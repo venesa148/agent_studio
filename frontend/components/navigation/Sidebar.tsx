@@ -132,8 +132,8 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
                   }
                 }}
                 className={`flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-colors ${item.active
-                    ? "bg-blue-50/80 text-blue-700 font-semibold"
-                    : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900"
+                  ? "bg-blue-50/80 text-blue-700 font-semibold"
+                  : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900"
                   }`}
                 title={isCollapsed ? item.name : undefined}
               >
@@ -147,8 +147,8 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
                 {!isCollapsed && item.count !== null && (
                   <span
                     className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${item.active
-                        ? "bg-blue-600 text-white"
-                        : "bg-slate-200/70 text-slate-700"
+                      ? "bg-blue-600 text-white"
+                      : "bg-slate-200/70 text-slate-700"
                       }`}
                   >
                     {item.count}
@@ -206,7 +206,6 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
                 <span className="text-xs font-semibold text-slate-800 leading-tight">
                   Studio Workspace
                 </span>
-                <span className="text-[10px] text-slate-400">BPJS & Healthcare</span>
               </div>
             </div>
             <button
