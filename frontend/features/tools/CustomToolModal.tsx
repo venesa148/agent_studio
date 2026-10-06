@@ -41,7 +41,7 @@ const AVAILABLE_SECRETS = [
 interface CustomToolModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaveTool: (toolData: any) => void;
+  onSaveTool: (toolData: any) => Promise<void>;
 }
 
 export function CustomToolModal({
@@ -93,6 +93,8 @@ export function CustomToolModal({
   const [testStatus, setTestStatus] = useState<"idle" | "success" | "error">(
     "idle"
   );
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
@@ -138,7 +140,7 @@ export function CustomToolModal({
     }, 800);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
@@ -163,8 +165,16 @@ export function CustomToolModal({
       parameters: parameters,
     };
 
-    onSaveTool(toolPayload);
-    onClose();
+    setSaveError(null);
+    setIsSaving(true);
+    try {
+      await onSaveTool(toolPayload);
+      onClose();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Tool tidak dapat disimpan.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -500,6 +510,7 @@ export function CustomToolModal({
               )}
             </div>
           </form>
+          {saveError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">{saveError}</p>}
         </div>
 
         {/* Footer */}
@@ -514,9 +525,10 @@ export function CustomToolModal({
           <button
             type="submit"
             form="custom-tool-form"
+            disabled={isSaving}
             className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors shadow-2xs"
           >
-            Save Tool to Catalog
+            {isSaving ? "Saving..." : "Save Tool to Catalog"}
           </button>
         </div>
       </div>

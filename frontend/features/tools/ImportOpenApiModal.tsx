@@ -68,7 +68,7 @@ const SAMPLE_ENDPOINTS: EndpointItem[] = [
 interface ImportOpenApiModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaveTools: (sourceData: any, importedTools: any[]) => void;
+  onSaveTools: (sourceData: { specUrl: string; prefix: string }) => Promise<void>;
 }
 
 export function ImportOpenApiModal({
@@ -90,6 +90,8 @@ export function ImportOpenApiModal({
   const [docs, setDocs] = useState("");
 
   const [endpoints, setEndpoints] = useState<EndpointItem[]>(SAMPLE_ENDPOINTS);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
@@ -105,40 +107,22 @@ export function ImportOpenApiModal({
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    const selectedEndpoints = endpoints.filter((ep) => ep.selected);
-    if (selectedEndpoints.length === 0) return;
-
-    const sourceData = {
-      id: name.toLowerCase().replace(/[^a-z0-9]/g, "-"),
-      name: name.trim(),
-      baseUrl: baseUrl.trim(),
-      prefix: prefix.trim(),
-      auth: auth,
-      secretName: auth !== "No credential" ? secretName : null,
-      docs: docs.trim(),
-    };
-
-    const importedTools = selectedEndpoints.map((ep) => ({
-      id: `openapi_${sourceData.id}_${prefix}${ep.operationId}`,
-      name: `${prefix}${ep.operationId}`,
-      description: ep.summary,
-      source: "OPENAPI",
-      sourceId: sourceData.id,
-      auth: auth === "No credential" ? "platform" : secretName,
-      health: "ok",
-      usedBy: "0 agent",
-      config: {
-        method: ep.method,
-        path: ep.path,
-        baseUrl: baseUrl,
-      },
-    }));
-
-    onSaveTools(sourceData, importedTools);
-    onClose();
+    if (sourceType !== "url") {
+      setSaveError("Saat ini import yang tersimpan ke registry mendukung URL OpenAPI JSON. Pilih URL Spec.");
+      return;
+    }
+    setSaveError(null);
+    setIsSaving(true);
+    try {
+      await onSaveTools({ specUrl: specUrl.trim(), prefix: prefix.trim() });
+      onClose();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Gagal mengimpor OpenAPI.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -414,6 +398,7 @@ export function ImportOpenApiModal({
                 ))}
               </div>
             </div>
+            {saveError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">{saveError}</p>}
           </form>
         </div>
 
@@ -429,9 +414,10 @@ export function ImportOpenApiModal({
           <button
             type="submit"
             form="openapi-import-form"
+            disabled={isSaving}
             className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors shadow-2xs"
           >
-            Import {endpoints.filter((e) => e.selected).length} Tools
+            {isSaving ? "Importing..." : "Import tools from URL"}
           </button>
         </div>
       </div>

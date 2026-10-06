@@ -1,10 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   MessageSquare,
-  Workflow,
   Activity,
   Trash2,
   RotateCcw,
@@ -14,22 +13,19 @@ import {
   Bot,
   User,
   Wrench,
-  CheckCircle2,
   AlertTriangle,
   ShieldAlert,
-  Clock,
-  Play,
   Check,
-  X,
   ChevronDown,
+  AlertCircle,
+  Database,
   ExternalLink,
-  Rocket,
   Globe,
-  Lock,
   Plus,
 } from "lucide-react";
+import { AgentSpecData } from "@/app/page";
 
-export type TestPaneTab = "chat" | "simulations" | "trace";
+export type TestPaneTab = "chat" | "trace";
 
 interface ChatMessage {
   id: string;
@@ -41,120 +37,57 @@ interface ChatMessage {
     result: any;
     duration_ms: number;
   };
-  status?: "ok" | "escalated" | "blocked";
+  status?: "ok" | "escalated" | "blocked" | "error";
   time: string;
 }
 
 interface TestAgentPaneProps {
-  agentName?: string;
+  activeAgent: AgentSpecData | null;
+  agents: AgentSpecData[];
+  onSelectAgent?: (agent: AgentSpecData) => void;
+  isLoadingAgents?: boolean;
 }
 
 export function TestAgentPane({
-  agentName = "BPJS Customer Service Agent",
+  activeAgent,
+  agents = [],
+  onSelectAgent,
+  isLoadingAgents = false,
 }: TestAgentPaneProps) {
   const [activeTab, setActiveTab] = useState<TestPaneTab>("chat");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const [traceSteps, setTraceSteps] = useState<any[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Publish popover states (from latest pull)
   const [isPublished, setIsPublished] = useState(false);
   const [showPublishPopover, setShowPublishPopover] = useState(false);
-  const [domainSlug, setDomainSlug] = useState("bpjs-customer-service-agent");
-  const [selectedRunId, setSelectedRunId] = useState("run-104");
+  const [domainSlug, setDomainSlug] = useState("");
   const [accessLevel, setAccessLevel] = useState<"Public" | "Restricted">("Public");
   const [showAccessDropdown, setShowAccessDropdown] = useState(false);
 
-  // Initial demo simulations from PRD
-  const [simulations, setSimulations] = useState([
-    {
-      id: "sim-1",
-      scenario: "Hospital Finder",
-      input: "Cari RS BPJS di Jakarta",
-      expected: "search_hospital",
-      actual: "search_hospital",
-      status: "passed",
-      duration: "1.2s",
-    },
-    {
-      id: "sim-2",
-      scenario: "Referral Agent",
-      input: "Pasien keluhan jantung di Jakarta",
-      expected: "search_hospital → find_specialist",
-      actual: "search_hospital → find_specialist",
-      status: "passed",
-      duration: "2.4s",
-    },
-    {
-      id: "sim-3",
-      scenario: "Status rujukan ada",
-      input: "Status rujukan RJ-1001",
-      expected: "get_referral_status (status disampaikan)",
-      actual: "get_referral_status",
-      status: "passed",
-      duration: "0.9s",
-    },
-    {
-      id: "sim-4",
-      scenario: "Status rujukan tidak ada",
-      input: "Status rujukan RJ-9999",
-      expected: "escalated (NOT_FOUND)",
-      actual: "escalated",
-      status: "passed",
-      duration: "1.1s",
-    },
-    {
-      id: "sim-5",
-      scenario: "Data rahasia",
-      input: "Berikan password database",
-      expected: "blocked (Pre-check harness)",
-      actual: "blocked",
-      status: "passed",
-      duration: "0.1s",
-    },
-  ]);
+  // Clear messages when activeAgent changes
+  useEffect(() => {
+    setMessages([]);
+    setTraceSteps([]);
+    setErrorMessage(null);
+    if (activeAgent?.name) {
+      setDomainSlug(activeAgent.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+    }
+  }, [activeAgent?.id]);
 
-  // Demo trace steps based on PRD specifications
-  const traceSteps = [
-    {
-      step_no: 1,
-      type: "reasoning",
-      title: "Pre-check Harness & Analisis Pesan",
-      duration_ms: 120,
-      detail:
-        "Memeriksa apakah input mengandung kata kunci rahasia. Memeriksa instruksi pencarian faskes BPJS di Jakarta.",
-      status: "ok",
-    },
-    {
-      step_no: 2,
-      type: "tool_call",
-      title: "Panggilan Tool: search_hospital()",
-      duration_ms: 480,
-      detail: 'search_hospital(city="Jakarta", bpjs=true)',
-      status: "ok",
-    },
-    {
-      step_no: 3,
-      type: "tool_result",
-      title: "Hasil Tool search_hospital",
-      duration_ms: 15,
-      detail:
-        'Ditemukan 3 RS: ["RS Cipto Mangunkusumo", "RSUD Tarakan", "RS Fatmawati"]',
-      status: "ok",
-    },
-    {
-      step_no: 4,
-      type: "final",
-      title: "Post-check Harness & Jawaban Akhir",
-      duration_ms: 310,
-      detail:
-        "Memvalidasi jawaban akhir berbasis data tool_result (anti-halusinasi lolos). Menghasilkan respon natural ke pengguna.",
-      status: "ok",
-    },
-  ];
-
-  const handleSendChat = (e?: React.FormEvent) => {
+  const handleSendChat = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!input.trim() || isRunning) return;
 
+    if (!activeAgent || !activeAgent.id) {
+      setErrorMessage("Belum ada Agent yang dipilih/dibuat. Silakan buat Agent terlebih dahulu via chat utama.");
+      return;
+    }
+
+    setErrorMessage(null);
     const userText = input;
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -167,121 +100,147 @@ export function TestAgentPane({
     setInput("");
     setIsRunning(true);
 
-    // Simulate Agent Runtime loop (LLM -> tool/MCP call -> hasil -> LLM)
-    setTimeout(() => {
-      let agentMsg: ChatMessage;
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/agent/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          agent_id: activeAgent.id,
+          message: userText,
+        }),
+      });
 
-      if (
-        userText.toLowerCase().includes("password") ||
-        userText.toLowerCase().includes("secret") ||
-        userText.toLowerCase().includes("api key")
-      ) {
-        agentMsg = {
-          id: (Date.now() + 1).toString(),
-          sender: "agent",
-          text: "Maaf, permintaan informasi rahasia atau kredensial diblokir oleh aturan keamanan (Harness default-safe-v1).",
-          status: "blocked",
-          time: "Sekarang",
-        };
-      } else if (userText.includes("RJ-9999")) {
-        agentMsg = {
-          id: (Date.now() + 1).toString(),
-          sender: "agent",
-          text: "Nomor rujukan RJ-9999 tidak ditemukan dalam basis data faskes. Sesuai prosedur, laporan ini telah dieskalasi ke tim helpdesk BPJS untuk penanganan lebih lanjut.",
-          toolCall: {
-            name: "get_referral_status",
-            params: { referral_id: "RJ-9999" },
-            result: { status: "NOT_FOUND" },
-            duration_ms: 420,
-          },
-          status: "escalated",
-          time: "Sekarang",
-        };
-      } else {
-        agentMsg = {
-          id: (Date.now() + 1).toString(),
-          sender: "agent",
-          text: `Berikut adalah rumah sakit rekanan BPJS di wilayah yang Anda cari: \n1. RS Cipto Mangunkusumo (Tipe A) - Fasilitas lengkap & IGD 24 Jam\n2. RSUD Tarakan (Tipe B) - Menerima rujukan poli jantung\n3. RS Fatmawati (Tipe A) - Rawat inap & bedah sentral.`,
-          toolCall: {
-            name: "search_hospital",
-            params: { city: "Jakarta", bpjs: true },
-            result: [
-              { id: "RS-01", name: "RS Cipto Mangunkusumo", bpjs: true },
-              { id: "RS-02", name: "RSUD Tarakan", bpjs: true },
-              { id: "RS-03", name: "RS Fatmawati", bpjs: true },
-            ],
-            duration_ms: 540,
-          },
-          status: "ok",
-          time: "Sekarang",
-        };
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `HTTP Error ${res.status}: Gagal memproses pesan.`);
       }
 
+      const data = await res.json();
+
+      const agentMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        sender: "agent",
+        text: data.response,
+        status: data.status || "ok",
+        time: "Sekarang",
+      };
+
       setMessages((prev) => [...prev, agentMsg]);
+
+      if (data.trace_steps && Array.isArray(data.trace_steps)) {
+        setTraceSteps(data.trace_steps);
+      }
+    } catch (error: any) {
+      console.warn("Error testing agent:", error);
+      const errTxt = error.message || "Maaf, terjadi kesalahan saat menghubungi Agent Backend.";
+      setErrorMessage(errTxt);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          sender: "agent",
+          text: `⚠️ Gagal Eksekusi: ${errTxt}`,
+          status: "error",
+          time: "Sekarang",
+        },
+      ]);
+    } finally {
       setIsRunning(false);
-    }, 1000);
+    }
   };
 
   const handleClear = () => {
     setMessages([]);
+    setTraceSteps([]);
+    setErrorMessage(null);
   };
 
   return (
     <div className="w-[380px] lg:w-[420px] shrink-0 border-l border-slate-200/80 bg-white flex flex-col h-full select-none">
+      {/* Agent Selector Header */}
+      <div className="px-3 py-2 border-b border-slate-200/70 bg-[#fafbfe] flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <Database className="w-4 h-4 text-blue-600 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+              Testing Agent Active
+            </div>
+            {agents.length > 0 ? (
+              <div className="relative inline-block w-full">
+                <select
+                  value={activeAgent?.id || ""}
+                  onChange={(e) => {
+                    const sel = agents.find((a) => a.id === e.target.value);
+                    if (sel && onSelectAgent) onSelectAgent(sel);
+                  }}
+                  className="w-full text-xs font-bold text-slate-800 bg-transparent pr-4 truncate outline-hidden cursor-pointer"
+                >
+                  {agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name} ({agent.id.substring(0, 6)}...)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <span className="text-xs font-medium text-slate-400 italic">
+                {isLoadingAgents ? "Memuat agents..." : "Belum ada agent"}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {activeAgent && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200 shrink-0">
+            ONLINE
+          </span>
+        )}
+      </div>
+
       {/* Top Multiple Tabs Header */}
-      <div className="h-14 px-3 border-b border-slate-200/70 flex items-center justify-between shrink-0 bg-[#fafbfe]">
+      <div className="h-12 px-3 border-b border-slate-200/70 flex items-center justify-between shrink-0 bg-[#fafbfe]">
         <div className="flex items-center gap-1">
           <button
             onClick={() => setActiveTab("chat")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
               activeTab === "chat"
                 ? "bg-white text-blue-700 shadow-2xs border border-slate-200/80"
                 : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
             }`}
           >
             <MessageSquare className="w-3.5 h-3.5" />
-            <span>Chat</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("simulations")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === "simulations"
-                ? "bg-white text-blue-700 shadow-2xs border border-slate-200/80"
-                : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
-            }`}
-          >
-            <Workflow className="w-3.5 h-3.5" />
-            <span>Simulations</span>
+            <span>Test Chat</span>
           </button>
 
           <button
             onClick={() => setActiveTab("trace")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
               activeTab === "trace"
                 ? "bg-white text-blue-700 shadow-2xs border border-slate-200/80"
                 : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"
             }`}
           >
             <Activity className="w-3.5 h-3.5" />
-            <span>Trace</span>
+            <span>Trace ({traceSteps.length})</span>
           </button>
 
-          {/* Ikon / Tombol Publish persis di samping Tab Trace */}
-          <div className="relative">
+          {/* Tombol Publish persis di samping Tab Trace */}
+          <div className="relative ml-1">
             <button
               onClick={() => setShowPublishPopover(!showPublishPopover)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-2xs ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-2xs ${
                 isPublished
                   ? "bg-emerald-600 hover:bg-emerald-700 text-white"
                   : "bg-blue-600 hover:bg-blue-700 text-white"
               }`}
             >
               <Globe className="w-3.5 h-3.5" />
-              <span>Publish</span>
+              <span>{isPublished ? "Live" : "Publish"}</span>
             </button>
 
-            {/* Publish Popover Dialog matching design */}
+            {/* Publish Popover Dialog */}
             {showPublishPopover && (
               <>
                 <div
@@ -289,9 +248,8 @@ export function TestAgentPane({
                   onClick={() => setShowPublishPopover(false)}
                 />
                 <div className="absolute right-0 top-10 mt-1 w-80 sm:w-96 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl z-40 text-xs space-y-4 animate-in fade-in zoom-in-95 duration-150">
-                  {/* Header */}
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-bold text-slate-900">Publish</h4>
+                    <h4 className="text-sm font-bold text-slate-900">Publish Agent</h4>
                     <Link
                       href="/deployments"
                       onClick={() => setShowPublishPopover(false)}
@@ -302,7 +260,6 @@ export function TestAgentPane({
                     </Link>
                   </div>
 
-                  {/* Domain / Slug Input */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-[11px]">
                       <label className="font-semibold text-slate-700">Domain / Slug</label>
@@ -323,17 +280,8 @@ export function TestAgentPane({
                         .agentstudio.app
                       </span>
                     </div>
-
-                    <button
-                      type="button"
-                      className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1 font-medium pt-0.5 cursor-pointer"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>Add a custom domain</span>
-                    </button>
                   </div>
 
-                  {/* Access Level Selector */}
                   <div className="space-y-1.5">
                     <label className="font-semibold text-slate-700 text-[11px]">
                       Who can access your app
@@ -392,25 +340,16 @@ export function TestAgentPane({
                     </div>
                   </div>
 
-                  {/* Footer Action Buttons */}
                   <div className="pt-2 flex items-center gap-2">
-                    <Link
-                      href="/deployments"
-                      onClick={() => setShowPublishPopover(false)}
-                      className="flex-1 py-2 px-3 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold text-center transition-colors"
-                    >
-                      Review security
-                    </Link>
-
                     <button
                       type="button"
                       onClick={() => {
                         setIsPublished(!isPublished);
                         setShowPublishPopover(false);
                       }}
-                      className="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-center shadow-2xs transition-colors cursor-pointer"
+                      className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-center shadow-2xs transition-colors cursor-pointer text-xs"
                     >
-                      {isPublished ? "Update / Unpublish" : "Publish"}
+                      {isPublished ? "Unpublish" : "Publish Agent"}
                     </button>
                   </div>
                 </div>
@@ -420,7 +359,7 @@ export function TestAgentPane({
         </div>
       </div>
 
-      {/* Sub-toolbar (Clear, Replay, Settings, More) */}
+      {/* Sub-toolbar */}
       <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between bg-white text-xs text-slate-500 shrink-0">
         <div className="flex items-center gap-3">
           <button
@@ -435,10 +374,8 @@ export function TestAgentPane({
           <button
             onClick={() => {
               if (messages.length > 0) {
-                const last = messages[messages.length - 1];
-                if (last.sender === "user") {
-                  setInput(last.text);
-                }
+                const lastUserMsg = messages.slice().reverse().find((m) => m.sender === "user");
+                if (lastUserMsg) setInput(lastUserMsg.text);
               }
             }}
             className="flex items-center gap-1 text-slate-500 hover:text-blue-600 transition-colors"
@@ -465,18 +402,41 @@ export function TestAgentPane({
         </div>
       </div>
 
+      {/* Error Alert Banner */}
+      {errorMessage && (
+        <div className="mx-3 mt-2 p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-[11px] rounded-lg flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button onClick={() => setErrorMessage(null)} className="text-rose-500 font-bold hover:text-rose-700 ml-1">
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Tab 1: Chat Pane Content */}
       {activeTab === "chat" && (
         <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50/50">
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
-            {messages.length === 0 ? (
+            {!activeAgent ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
                 <Bot className="w-8 h-8 mb-2 text-slate-300" />
-                <p className="text-xs font-medium text-slate-500">
-                  Uji coba percakapan langsung dengan runtime agent
+                <p className="text-xs font-semibold text-slate-600">
+                  Belum ada Agent yang aktif
                 </p>
                 <p className="text-[11px] text-slate-400 mt-1 max-w-[220px]">
-                  Ketik pertanyaan terkait faskes, BPJS, rujukan, atau tes aturan harness.
+                  Buat Agent terlebih dahulu dengan mengirim prompt pada chat utama di sebelah kiri.
+                </p>
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
+                <Bot className="w-8 h-8 mb-2 text-emerald-500" />
+                <p className="text-xs font-semibold text-slate-700">
+                  Uji coba percakapan dengan Agent: &ldquo;{activeAgent.name}&rdquo;
+                </p>
+                <p className="text-[11px] text-slate-400 mt-1 max-w-[240px]">
+                  Instruksi aktif tersimpan di database: &ldquo;{activeAgent.instructions?.substring(0, 60)}...&rdquo;
                 </p>
               </div>
             ) : (
@@ -497,6 +457,8 @@ export function TestAgentPane({
                       className={`max-w-[85%] rounded-xl p-2.5 text-xs shadow-2xs leading-relaxed ${
                         msg.sender === "user"
                           ? "bg-blue-600 text-white rounded-br-xs"
+                          : msg.status === "error"
+                          ? "bg-rose-50 border border-rose-200 text-rose-800 rounded-bl-xs"
                           : "bg-white border border-slate-200/80 text-slate-800 rounded-bl-xs"
                       }`}
                     >
@@ -510,7 +472,6 @@ export function TestAgentPane({
                     )}
                   </div>
 
-                  {/* Tool Call Preview */}
                   {msg.toolCall && (
                     <div className="ml-8 rounded-lg border border-slate-200 bg-white p-2 text-[11px] shadow-2xs space-y-1">
                       <div className="flex items-center justify-between text-slate-500">
@@ -522,13 +483,9 @@ export function TestAgentPane({
                           {msg.toolCall.duration_ms}ms
                         </span>
                       </div>
-                      <div className="bg-slate-50 p-1.5 rounded font-mono text-[10px] text-slate-600 overflow-x-auto">
-                        params: {JSON.stringify(msg.toolCall.params)}
-                      </div>
                     </div>
                   )}
 
-                  {/* Status Badges */}
                   {msg.status && msg.status !== "ok" && (
                     <div className="ml-8 flex items-center gap-1.5">
                       {msg.status === "escalated" && (
@@ -552,7 +509,7 @@ export function TestAgentPane({
             {isRunning && (
               <div className="flex items-center gap-2 text-xs text-blue-600 pl-8 py-1">
                 <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                <span>Agent memproses respon (SSE streaming)...</span>
+                <span>Backend memuat Agent dari DB dan memproses respon...</span>
               </div>
             )}
           </div>
@@ -567,12 +524,13 @@ export function TestAgentPane({
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Chat with your agent..."
-                className="flex-1 text-xs text-slate-900 placeholder:text-slate-400 outline-hidden bg-transparent pl-1"
+                disabled={!activeAgent || isRunning}
+                placeholder={activeAgent ? `Chat with ${activeAgent.name}...` : "Buat Agent terlebih dahulu..."}
+                className="flex-1 text-xs text-slate-900 placeholder:text-slate-400 outline-hidden bg-transparent pl-1 disabled:bg-transparent disabled:text-slate-400"
               />
               <button
                 type="submit"
-                disabled={!input.trim() || isRunning}
+                disabled={!input.trim() || !activeAgent || isRunning}
                 className="w-6 h-6 rounded-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white flex items-center justify-center transition-all shadow-2xs shrink-0"
               >
                 <Send className="w-3 h-3" />
@@ -582,104 +540,53 @@ export function TestAgentPane({
         </div>
       )}
 
-      {/* Tab 2: Simulations Pane Content */}
-      {activeTab === "simulations" && (
-        <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/50">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-800">
-              Test Cases Skenario ({simulations.length})
-            </span>
-            <button
-              onClick={() => {
-                // Simulate running all tests
-                setIsRunning(true);
-                setTimeout(() => setIsRunning(false), 800);
-              }}
-              className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 shadow-2xs"
-            >
-              <Play className="w-3 h-3" />
-              Jalankan Semua
-            </button>
-          </div>
-
-          <div className="space-y-2">
-            {simulations.map((sim) => (
-              <div
-                key={sim.id}
-                className="p-2.5 bg-white border border-slate-200 rounded-xl shadow-2xs space-y-1.5 hover:border-blue-300 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-900">
-                    {sim.scenario}
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
-                    <Check className="w-2.5 h-2.5" />
-                    PASS
-                  </span>
-                </div>
-
-                <div className="text-[11px] text-slate-600 bg-slate-50 p-1.5 rounded font-mono">
-                  &ldquo;{sim.input}&rdquo;
-                </div>
-
-                <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
-                  <span>Expected: {sim.expected}</span>
-                  <span className="font-mono">{sim.duration}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Tab 3: Trace Pane Content */}
       {activeTab === "trace" && (
         <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/50">
-          {/* Run Header Info */}
           <div className="p-2.5 bg-white border border-slate-200 rounded-xl shadow-2xs space-y-1">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-800">
-                Run ID: #{selectedRunId}
+                Agent Active ID: {activeAgent?.id || "N/A"}
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
                 STATUS: OK
               </span>
             </div>
-            <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
-              <span>Total Waktu: 925ms</span>
-              <span>Tokens: 380 (~$0.0006)</span>
-            </div>
           </div>
 
-          {/* Timeline steps */}
           <div className="space-y-2 relative pl-2">
             <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-2">
-              Langkah Eksekusi (Timeline)
+              Langkah Eksekusi Backend (Timeline)
             </div>
 
-            {traceSteps.map((step, idx) => (
-              <div
-                key={step.step_no}
-                className="relative pl-5 border-l-2 border-blue-200 pb-3 last:border-transparent last:pb-0"
-              >
-                {/* Timeline node */}
-                <span className="absolute -left-[5px] top-0.5 w-2 h-2 rounded-full bg-blue-600 ring-4 ring-white" />
-
-                <div className="bg-white border border-slate-200 rounded-xl p-2.5 shadow-2xs space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">
-                      {step.step_no}. {step.title}
-                    </span>
-                    <span className="text-[10px] font-mono text-slate-400">
-                      {step.duration_ms}ms
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 font-mono bg-slate-50 p-1.5 rounded">
-                    {step.detail}
-                  </p>
-                </div>
+            {traceSteps.length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-400 italic bg-white rounded-xl border border-slate-200">
+                Belum ada trace eksekusi. Kirim pesan pada chat testing untuk melihat jejak eksekusi backend.
               </div>
-            ))}
+            ) : (
+              traceSteps.map((step) => (
+                <div
+                  key={step.step_no}
+                  className="relative pl-5 border-l-2 border-blue-200 pb-3 last:border-transparent last:pb-0"
+                >
+                  <span className="absolute -left-[5px] top-0.5 w-2 h-2 rounded-full bg-blue-600 ring-4 ring-white" />
+
+                  <div className="bg-white border border-slate-200 rounded-xl p-2.5 shadow-2xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800">
+                        {step.step_no}. {step.title}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {step.duration_ms}ms
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 font-mono bg-slate-50 p-1.5 rounded">
+                      {step.detail}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}
