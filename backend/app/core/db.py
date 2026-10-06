@@ -47,6 +47,22 @@ async def init_db():
                 await conn.execute(text("ALTER TABLE agent_specs ADD COLUMN status VARCHAR(50) DEFAULT 'active'"))
             if "updated_at" not in cols:
                 await conn.execute(text("ALTER TABLE agent_specs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"))
+        if "tools" in tables:
+            cols = await conn.run_sync(lambda sync_conn: [c['name'] for c in inspect(sync_conn).get_columns("tools")])
+            if "source_type" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN source_type VARCHAR(50) DEFAULT 'mcp'"))
+            if "mcp_server_id" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN mcp_server_id VARCHAR(36) NULL"))
+            if "input_schema" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN input_schema JSON NULL"))
+            if "is_active" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN is_active BOOLEAN DEFAULT 1"))
+            if "auth_custody" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN auth_custody VARCHAR(100) DEFAULT 'none'"))
+            if "health_status" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN health_status VARCHAR(50) DEFAULT 'healthy'"))
+            if "used_by" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN used_by VARCHAR(255) DEFAULT 'All agents'"))
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

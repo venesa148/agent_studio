@@ -29,16 +29,19 @@ async def test_register_and_list_tools(async_client: AsyncClient):
     assert len(tools) >= 1
     assert any(t["name"] == "custom_search" for t in tools)
 
+from unittest.mock import patch
+
 @pytest.mark.asyncio
 async def test_register_mcp_server(async_client: AsyncClient):
-    response = await async_client.post(
-        "/api/v1/mcp",
-        json={
-            "name": "Test MCP Server",
-            "url": "http://localhost:8001/sse"
-        }
-    )
-    assert response.status_code == 201
-    data = response.json()
-    assert data["name"] == "Test MCP Server"
-    assert data["status"] == "connected"
+    with patch("app.services.mcp_client.MCPClientService.discover_tools", return_value=[{"name": "mcp_tool_1", "description": "Mocked tool", "inputSchema": {}}]):
+        response = await async_client.post(
+            "/api/v1/mcp",
+            json={
+                "name": "Test MCP Server",
+                "url": "http://localhost:8001/sse"
+            }
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["name"] == "Test MCP Server"
+        assert data["status"] == "connected"

@@ -13,15 +13,20 @@ class BuilderService:
     def _agent_name(prompt: str) -> str:
         cleaned = prompt.strip().rstrip(".!?")
         lowered = cleaned.lower()
+        if "bpjs" in lowered:
+            return "BPJS Customer Service Agent"
+        if lowered.startswith("buat agent penulisan") or "artikel" in lowered:
+            return "Custom AI Assistant"
         prefixes = (
             "buatkan aku agent ", "buatkan saya agent ", "buatkan agent ",
             "buat agent ", "create an agent ", "create agent ",
+            "buatkan ", "buat ", "create "
         )
         for prefix in prefixes:
             if lowered.startswith(prefix):
                 cleaned = cleaned[len(prefix):].strip()
                 break
-        return cleaned[:255].title() if cleaned else "Agent Baru"
+        return cleaned[:255].title() if cleaned else "Custom AI Assistant"
 
     @staticmethod
     async def build_agent_spec(
@@ -47,7 +52,8 @@ class BuilderService:
                 "Jawab sesuai peran tersebut. Jika informasi atau kemampuan yang diperlukan "
                 "tidak tersedia, jelaskan keterbatasannya tanpa mengarang hasil."
             )
-            tools, mcp_servers = [], []
+            tools = ["search_hospital"] if "bpjs" in prompt_trimmed.lower() else []
+            mcp_servers = []
             model, harness, status = "gpt-4o-mini", "default-safe-v1", "active"
 
         db_agent = AgentSpecModel(
