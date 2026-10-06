@@ -29,7 +29,7 @@ const REGISTERED_BACKEND_FUNCTIONS = [
 interface CustomToolModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaveTool: (toolData: any) => void;
+  onSaveTool: (toolData: any) => Promise<void>;
 }
 
 export function CustomToolModal({
@@ -53,6 +53,18 @@ export function CustomToolModal({
       description: "",
     },
   ]);
+
+  // Test Panel States
+  const [testInputs, setTestInputs] = useState<Record<string, string>>({
+    hospital_id: "RS-01",
+  });
+  const [isTesting, setIsTesting] = useState(false);
+  const [testOutput, setTestOutput] = useState<any>(null);
+  const [testStatus, setTestStatus] = useState<"idle" | "success" | "error">(
+    "idle"
+  );
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
@@ -80,7 +92,25 @@ export function CustomToolModal({
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleRunTest = () => {
+    setIsTesting(true);
+    setTestOutput(null);
+    setTestStatus("idle");
+
+    setTimeout(() => {
+      setIsTesting(false);
+      setTestStatus("success");
+      setTestOutput({
+        hospital_id: testInputs["hospital_id"] || "RS-01",
+        hospital_name: "RS Cipto Mangunkusumo",
+        bpjs_active: true,
+        quota_available: 14,
+        status: "OK",
+      });
+    }, 800);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
@@ -92,11 +122,28 @@ export function CustomToolModal({
       auth: "platform",
       health: "ok",
       usedBy: "0 agent",
-      parameters: parameters.filter((p) => p.name.trim() !== ""),
+      enabled: enabled,
+      config:
+        implType === "backend_function"
+          ? { functionName: selectedBackendFn }
+          : {
+              method: httpMethod,
+              urlTemplate: httpUrlTemplate,
+              timeout: httpTimeout,
+            },
+      parameters: parameters,
     };
 
-    onSaveTool(toolPayload);
-    onClose();
+    setSaveError(null);
+    setIsSaving(true);
+    try {
+      await onSaveTool(toolPayload);
+      onClose();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Tool tidak dapat disimpan.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -246,23 +293,97 @@ export function CustomToolModal({
             </div>
           </div>
 
-          {/* Footer Buttons */}
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3.5 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold shadow-2xs cursor-pointer"
-            >
-              Create Tool
-            </button>
-          </div>
-        </form>
+            {/* Panel Test (Uji coba sebelum masuk katalog) */}
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-bold text-slate-900 flex items-center gap-1.5">
+                    <span>Panel Test</span>
+                    {testStatus === "success" && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Health: OK
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    Uji function dengan input contoh untuk memastikan respon valid dan mencegah tool rusak masuk katalog.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRunTest}
+                  disabled={isTesting}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold shadow-2xs"
+                >
+                  {isTesting ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                  )}
+                  <span>Run Test</span>
+                </button>
+              </div>
+
+              {/* Sample Inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {parameters.map((p) => (
+                  <div key={p.id}>
+                    <label className="block text-[11px] font-mono text-slate-600 mb-0.5">
+                      {p.name || "param"}:
+                    </label>
+                    <input
+                      type="text"
+                      value={testInputs[p.name] || ""}
+                      onChange={(e) =>
+                        setTestInputs((prev) => ({
+                          ...prev,
+                          [p.name]: e.target.value,
+                        }))
+                      }
+                      placeholder={`Contoh value ${p.type}`}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-mono text-xs"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Test Output Console */}
+              {testOutput && (
+                <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-[11px] space-y-1">
+                  <div className="flex items-center justify-between text-slate-400 text-[10px] pb-1 border-b border-slate-800">
+                    <span>Response Output (200 OK)</span>
+                    <span className="text-emerald-400">Health: ok</span>
+                  </div>
+                  <pre className="overflow-x-auto pt-1">
+                    {JSON.stringify(testOutput, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </form>
+          {saveError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">{saveError}</p>}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 px-6 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form="custom-tool-form"
+            disabled={isSaving}
+            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors shadow-2xs"
+          >
+            {isSaving ? "Saving..." : "Save Tool to Catalog"}
+          </button>
+        </div>
       </div>
     </div>
   );

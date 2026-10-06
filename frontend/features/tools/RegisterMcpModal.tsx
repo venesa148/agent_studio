@@ -123,7 +123,7 @@ const AVAILABLE_SECRETS = [
 interface RegisterMcpModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaveServer: (serverData: any, discoveredTools: any[]) => void;
+  onSaveServer: (serverData: any) => Promise<void>;
 }
 
 export function RegisterMcpModal({
@@ -142,7 +142,6 @@ export function RegisterMcpModal({
 
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
-  const [discoveredTools, setDiscoveredTools] = useState<string[]>([]);
 
   if (!isOpen) return null;
 
@@ -160,54 +159,18 @@ export function RegisterMcpModal({
     setIsDiscovering(true);
     setDiscoveryError(null);
 
-    // Simulate backend discovery pass: calls tools/list
-    setTimeout(() => {
-      // Mock validation / discovery pass
-      if (endpointUrl.includes("error")) {
-        setDiscoveryError("Discovery gagal: Server MCP tidak merespons tools/list atau kredensial ditolak.");
-        setIsDiscovering(false);
-        return;
-      }
-
-      const sampleDiscovered = endpointUrl.includes("hospital")
-        ? [
-            "search_hospital",
-            "get_hospital_detail",
-            "check_bpjs",
-            "find_specialist",
-            "get_referral_status",
-          ]
-        : [`${name.replace(/-/g, "_")}_query`, `${name.replace(/-/g, "_")}_inspect`];
-
-      setDiscoveredTools(sampleDiscovered);
-      setIsDiscovering(false);
-
+    try {
       const serverPayload = {
-        id: name.toLowerCase().trim(),
         name: name.trim(),
         endpointUrl: endpointUrl.trim(),
-        transport: "Streamable HTTP",
-        auth: auth,
-        secretName: auth !== "No credential" ? secretName : null,
-        docs: docs.trim(),
-        toolsCount: sampleDiscovered.length,
-        status: "ok",
-        lastSynced: "Baru saja",
       };
-
-      const toolsPayload = sampleDiscovered.map((tName) => ({
-        id: `mcp_${name}_${tName}`,
-        name: tName,
-        source: "MCP",
-        sourceId: serverPayload.id,
-        auth: auth === "No credential" ? "platform" : secretName,
-        health: "ok",
-        usedBy: "0 agent",
-      }));
-
-      onSaveServer(serverPayload, toolsPayload);
+      await onSaveServer(serverPayload);
       onClose();
-    }, 1000);
+    } catch (error) {
+      setDiscoveryError(error instanceof Error ? error.message : "Gagal mendaftarkan MCP server.");
+    } finally {
+      setIsDiscovering(false);
+    }
   };
 
   return (

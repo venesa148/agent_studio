@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { Sidebar } from "@/components/navigation/Sidebar";
 import {
@@ -12,16 +12,43 @@ import {
   Bot,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 
 export default function AllAgentsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("All Statuses");
-  const [selectedVersion, setSelectedVersion] = useState("All Versions");
-  const [sortBy, setSortBy] = useState("Last Updated");
-
-  // State agen murni frontend (tanpa data dummy, siap menerima data)
   const [agents, setAgents] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchAgents = async () => {
+    try {
+      setIsLoading(true);
+      const res = await fetch("http://localhost:8000/api/v1/agent");
+      if (res.ok) {
+        const data = await res.json();
+        setAgents(data);
+      }
+    } catch (e) {
+      console.warn("Failed to load agents list:", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAgents();
+  }, []);
+
+  const filteredAgents = agents.filter((agent) => {
+    const matchesSearch =
+      agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (agent.description && agent.description.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesStatus =
+      selectedStatus === "All Statuses" ||
+      agent.status?.toLowerCase() === selectedStatus.toLowerCase();
+    return matchesSearch && matchesStatus;
+  });
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#fafbfe]">
@@ -40,6 +67,13 @@ export default function AllAgentsPage() {
             <span className="text-slate-300">/</span>
             <span className="font-semibold text-slate-900">Agents</span>
           </nav>
+          <button
+            onClick={fetchAgents}
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-blue-600 transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
+            <span>Refresh</span>
+          </button>
         </header>
 
         {/* Content Wrapper */}
@@ -48,13 +82,13 @@ export default function AllAgentsPage() {
           <section className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                AGENTS
+                AGENTS DATABASE
               </span>
               <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight mt-0.5">
-                All Agents
+                All Agents ({agents.length})
               </h1>
               <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                Manage and organize your AI agents. Create new agents or view details of existing ones.
+                Daftar seluruh AI Agent yang telah dibuat dan tersimpan di database.
               </p>
             </div>
 
@@ -76,38 +110,19 @@ export default function AllAgentsPage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search agents..."
+                placeholder="Search agents by name or description..."
                 className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all shadow-2xs"
               />
             </div>
 
             {/* Filter Dropdown Buttons */}
             <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-              {/* Status Filter */}
               <button
                 type="button"
-                className="inline-flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-2xs"
+                className="inline-flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-all shadow-2xs"
               >
                 <span>{selectedStatus}</span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-              </button>
-
-              {/* Version Filter */}
-              <button
-                type="button"
-                className="inline-flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-2xs"
-              >
-                <span>{selectedVersion}</span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-              </button>
-
-              {/* Sort Order */}
-              <button
-                type="button"
-                className="inline-flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-2xs"
-              >
-                <span>{sortBy}</span>
-                <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
               </button>
             </div>
           </section>
@@ -118,16 +133,25 @@ export default function AllAgentsPage() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200/80 bg-slate-50/60 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                    <th className="py-3.5 px-6 min-w-[240px]">Name</th>
-                    <th className="py-3.5 px-6 min-w-[340px]">Description</th>
-                    <th className="py-3.5 px-4 min-w-[110px]">Status</th>
-                    <th className="py-3.5 px-4 min-w-[90px]">Version</th>
-                    <th className="py-3.5 px-6 min-w-[150px]">Last Updated</th>
-                    <th className="py-3.5 px-6 min-w-[130px]">Deployment</th>
+                    <th className="py-3.5 px-6 min-w-[200px]">ID / Name</th>
+                    <th className="py-3.5 px-6 min-w-[280px]">Description</th>
+                    <th className="py-3.5 px-4 min-w-[100px]">Status</th>
+                    <th className="py-3.5 px-4 min-w-[100px]">Model</th>
+                    <th className="py-3.5 px-4 min-w-[160px]">Tools</th>
+                    <th className="py-3.5 px-6 min-w-[150px]">Created At</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
-                  {agents.length === 0 ? (
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-400">
+                        <div className="flex items-center justify-center gap-2 text-xs">
+                          <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                          <span>Loading agents from database...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : filteredAgents.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="py-16 text-center">
                         <div className="flex flex-col items-center justify-center text-slate-400">
@@ -135,7 +159,7 @@ export default function AllAgentsPage() {
                             <Bot className="w-6 h-6" />
                           </div>
                           <p className="text-sm font-semibold text-slate-700">
-                            Belum ada agent yang dibuat
+                            Belum ada agent yang ditemukan
                           </p>
                           <p className="text-xs text-slate-400 mt-1 max-w-sm">
                             Mulai buat agent baru dengan menekan tombol Create Agent.
@@ -151,14 +175,46 @@ export default function AllAgentsPage() {
                       </td>
                     </tr>
                   ) : (
-                    agents.map((agent: any) => (
+                    filteredAgents.map((agent: any) => (
                       <tr key={agent.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-4 px-6">{agent.name}</td>
-                        <td className="py-4 px-6">{agent.description}</td>
-                        <td className="py-4 px-4">{agent.status}</td>
-                        <td className="py-4 px-4">{agent.version}</td>
-                        <td className="py-4 px-6">{agent.updatedAt}</td>
-                        <td className="py-4 px-6">{agent.deployment}</td>
+                        <td className="py-4 px-6 font-semibold text-slate-900">
+                          <div>{agent.name}</div>
+                          <div className="text-[10px] font-mono text-slate-400 font-normal">
+                            ID: {agent.id}
+                          </div>
+                        </td>
+                        <td className="py-4 px-6 text-slate-600">
+                          <p className="line-clamp-2">{agent.description || "-"}</p>
+                        </td>
+                        <td className="py-4 px-4">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            {agent.status || "active"}
+                          </span>
+                        </td>
+                        <td className="py-4 px-4 font-mono text-[11px] text-slate-700">
+                          {agent.model}
+                        </td>
+                        <td className="py-4 px-4">
+                          <div className="flex flex-wrap gap-1">
+                            {agent.tools && agent.tools.length > 0 ? (
+                              agent.tools.map((t: string) => (
+                                <span
+                                  key={t}
+                                  className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-mono border border-blue-200/60"
+                                >
+                                  {t}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-slate-400 text-[10px] italic">No tools</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-4 px-6 text-slate-500 text-[11px]">
+                          {agent.created_at
+                            ? new Date(agent.created_at).toLocaleString("id-ID")
+                            : "-"}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -166,32 +222,8 @@ export default function AllAgentsPage() {
               </table>
             </div>
 
-            {/* Table Pagination / Footer Elements */}
             <div className="px-6 py-3 border-t border-slate-200/80 bg-slate-50/50 flex items-center justify-between text-xs text-slate-500">
-              <span>Showing {agents.length} of {agents.length} agents</span>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  disabled
-                  className="p-1 rounded-lg border border-slate-200 text-slate-300 disabled:opacity-40 cursor-not-allowed"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  disabled
-                  className="px-2.5 py-1 rounded-lg bg-blue-600/70 text-white font-medium text-xs shadow-2xs cursor-default"
-                >
-                  1
-                </button>
-                <button
-                  type="button"
-                  disabled
-                  className="p-1 rounded-lg border border-slate-200 text-slate-300 disabled:opacity-40 cursor-not-allowed"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+              <span>Showing {filteredAgents.length} of {agents.length} agents</span>
             </div>
           </section>
         </div>
