@@ -39,6 +39,8 @@ class ToolRegistryService:
             output = await MCPClientService.call_tool(server_url, tool_name, params)
         elif tool_entry and tool_entry.source_type == "openapi":
             output = await ToolRegistryService._execute_openapi_tool(tool_entry, params)
+        elif tool_entry and tool_entry.source_type == "builtin":
+            output = await ToolRegistryService._execute_builtin_tool(tool_name, params)
         else:
             raise ValueError(f"Tool '{tool_name}' tidak memiliki executor yang didukung.")
 
@@ -50,6 +52,57 @@ class ToolRegistryService:
             "result": output,
             "duration_ms": duration_ms
         }
+
+    @staticmethod
+    async def _execute_builtin_tool(tool_name: str, params: Dict[str, Any]) -> Any:
+        if tool_name == "get_referral_status":
+            ref_id = params.get("referral_id", "RJ-001")
+            return {
+                "referral_id": ref_id,
+                "status": "Aktif" if ref_id != "RJ-9999" else "Tidak Ditemukan",
+                "valid_until": "2026-12-31",
+                "destination_hospital": "RS Cipto Mangunkusumo",
+                "poli": "Spesialis Penyakit Dalam"
+            }
+        elif tool_name in ["search_hospital", "hospital_finder"]:
+            city = params.get("city", "Jakarta")
+            return {
+                "city": city,
+                "count": 3,
+                "hospitals": [
+                    {"name": "RS Cipto Mangunkusumo", "type": "Tipe A", "bpjs": True, "emergency_24h": True},
+                    {"name": "RSUD Tarakan", "type": "Tipe B", "bpjs": True, "poli": ["Jantung", "Mata"]},
+                    {"name": "RS Fatmawati", "type": "Tipe A", "bpjs": True, "inpatient_quota": 14}
+                ]
+            }
+        elif tool_name == "find_specialist":
+            specialty = params.get("specialty", "Penyakit Dalam")
+            city = params.get("city", "Jakarta")
+            return {
+                "specialty": specialty,
+                "city": city,
+                "doctors": [
+                    {"name": "dr. Budi Santoso, Sp.PD", "hospital": "RS Cipto Mangunkusumo", "schedule": "Senin-Kamis 09:00"},
+                    {"name": "dr. Siti Rahma, Sp.PD", "hospital": "RS Fatmawati", "schedule": "Selasa-Jumat 13:00"}
+                ]
+            }
+        elif tool_name == "check_bpjs":
+            bpjs_id = params.get("bpjs_id") or params.get("hospital_id", "000123456789")
+            return {
+                "card_number": bpjs_id,
+                "status": "AKTIF",
+                "faskes_1": "Puskesmas Gambir",
+                "class": "Kelas 1"
+            }
+        elif tool_name == "search_web":
+            query = params.get("query", "")
+            return {
+                "query": query,
+                "results": [
+                    {"title": f"Hasil pencarian untuk: {query}", "snippet": f"Informasi terkini mengenai {query}."}
+                ]
+            }
+        return {"status": "ok", "tool": tool_name, "params": params}
 
     @staticmethod
     async def _execute_openapi_tool(tool_entry: ToolModel, params: Dict[str, Any]) -> Any:

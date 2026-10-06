@@ -2,6 +2,7 @@ import asyncio
 import sys
 from sqlalchemy import inspect
 from app.core.db import engine, init_db
+import app.models
 
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())

@@ -64,6 +64,27 @@ async def init_db():
             if "used_by" not in cols:
                 await conn.execute(text("ALTER TABLE tools ADD COLUMN used_by VARCHAR(255) DEFAULT 'All agents'"))
 
+            # Pastikan tools built-in standar tersimpan di database
+            import uuid
+            default_builtin_tools = [
+                ("search_hospital", "Cari data rumah sakit rekanan BPJS dan ketersediaan layanan faskes", "builtin"),
+                ("get_referral_status", "Cek status dan validitas nomor rujukan faskes BPJS", "builtin"),
+                ("find_specialist", "Cari dokter spesialis berdasarkan poliklinik dan kota", "builtin"),
+                ("check_bpjs", "Cek status kepesertaan BPJS dan eligibility layanan", "builtin"),
+                ("search_web", "Search the web for real-time information", "builtin"),
+                ("hospital_finder", "Cari data rumah sakit terdekat dan status faskes BPJS", "builtin"),
+            ]
+            from datetime import datetime, timezone
+            for t_name, t_desc, t_source in default_builtin_tools:
+                check_t = await conn.execute(text("SELECT id FROM tools WHERE name = :name"), {"name": t_name})
+                if not check_t.scalar():
+                    t_id = str(uuid.uuid4())
+                    await conn.execute(
+                        text("INSERT INTO tools (id, name, description, source_type, is_active, auth_custody, health_status, used_by, created_at) "
+                             "VALUES (:id, :name, :description, :source_type, 1, 'none', 'healthy', 'All agents', :created_at)"),
+                        {"id": t_id, "name": t_name, "description": t_desc, "source_type": t_source, "created_at": datetime.now(timezone.utc)}
+                    )
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:

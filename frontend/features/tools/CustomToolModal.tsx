@@ -7,6 +7,9 @@ import {
   Plus,
   Trash2,
   ChevronDown,
+  CheckCircle2,
+  Loader2,
+  Play,
 } from "lucide-react";
 
 interface ParamField {
@@ -122,15 +125,8 @@ export function CustomToolModal({
       auth: "platform",
       health: "ok",
       usedBy: "0 agent",
-      enabled: enabled,
-      config:
-        implType === "backend_function"
-          ? { functionName: selectedBackendFn }
-          : {
-              method: httpMethod,
-              urlTemplate: httpUrlTemplate,
-              timeout: httpTimeout,
-            },
+      enabled: true,
+      config: { functionName: selectedBackendFn },
       parameters: parameters,
     };
 
@@ -167,7 +163,7 @@ export function CustomToolModal({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs">
+        <form id="custom-tool-form" onSubmit={handleSubmit} className="p-5 space-y-4 text-xs">
           {/* Tool Name */}
           <div>
             <label className="block font-semibold text-slate-800 mb-1">
@@ -363,8 +359,7 @@ export function CustomToolModal({
               )}
             </div>
           </form>
-          {saveError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">{saveError}</p>}
-        </div>
+          {saveError && <div className="px-5 pb-4"><p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">{saveError}</p></div>}
 
         {/* Footer */}
         <div className="p-4 px-6 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-2 shrink-0">

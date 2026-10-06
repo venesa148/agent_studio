@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Columns2,
   RotateCcw,
@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronRight,
   AlertCircle,
+  Wrench,
+  Plus,
 } from "lucide-react";
 import { AgentSpecData } from "@/app/page";
 
@@ -38,6 +40,30 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentCh
   const [showSpecDetails, setShowSpecDetails] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  const [dbTools, setDbTools] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch("http://localhost:8000/api/v1/tools")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => setDbTools(data))
+      .catch((err) => console.warn("Failed to load tools from database:", err));
+  }, []);
+
+  const handleToggleTool = (msgId: string, toolName: string) => {
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.id === msgId && msg.spec) {
+          const currentTools = msg.spec.tools || [];
+          const exists = currentTools.includes(toolName);
+          const updatedTools = exists
+            ? currentTools.filter((t) => t !== toolName)
+            : [...currentTools, toolName];
+          return { ...msg, spec: { ...msg.spec, tools: updatedTools } };
+        }
+        return msg;
+      })
+    );
+  };
 
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -317,19 +343,70 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentCh
                         </div>
 
                         <div>
-                          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                            Tools Terpilih ({msg.spec.tools ? msg.spec.tools.length : 0})
+                          <div className="flex items-center justify-between">
+                            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                              <Wrench className="w-3 h-3 text-blue-600" />
+                              <span>Tools dari Database ({msg.spec.tools ? msg.spec.tools.length : 0})</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400">
+                              Katalog Database
+                            </span>
                           </div>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {msg.spec.tools && msg.spec.tools.map((tool) => (
-                              <span
-                                key={tool}
-                                className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200/60 font-mono text-[11px]"
-                              >
-                                {tool}()
+
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {msg.spec.tools && msg.spec.tools.length > 0 ? (
+                              msg.spec.tools.map((tool) => (
+                                <span
+                                  key={tool}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200/60 font-mono text-[11px]"
+                                >
+                                  <span>{tool}()</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleTool(msg.id, tool)}
+                                    className="text-blue-400 hover:text-rose-600 font-bold ml-0.5 cursor-pointer"
+                                    title="Hapus tool ini dari agent"
+                                  >
+                                    ✕
+                                  </button>
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-slate-400 text-[11px] italic">
+                                Belum ada tool dipilih dari database.
                               </span>
-                            ))}
+                            )}
                           </div>
+
+                          {/* Opsi penambahan tools aktif yang tersedia dari database */}
+                          {dbTools.length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-slate-100">
+                              <span className="text-[10px] text-slate-400 block mb-1">
+                                Tools aktif di database (klik untuk tambah / hapus):
+                              </span>
+                              <div className="flex flex-wrap gap-1">
+                                {dbTools.map((dbTool) => {
+                                  const isSelected = msg.spec?.tools?.includes(dbTool.name);
+                                  return (
+                                    <button
+                                      key={dbTool.id || dbTool.name}
+                                      type="button"
+                                      onClick={() => handleToggleTool(msg.id, dbTool.name)}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-all cursor-pointer ${
+                                        isSelected
+                                          ? "bg-blue-600 text-white border-blue-600 font-semibold shadow-2xs"
+                                          : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                                      }`}
+                                      title={dbTool.description || dbTool.name}
+                                    >
+                                      {isSelected ? "✓ " : "+ "}
+                                      {dbTool.name}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex items-center justify-between pt-1">

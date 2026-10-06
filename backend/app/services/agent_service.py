@@ -22,8 +22,20 @@ class AgentService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def filter_registered_tools(db: AsyncSession, tools: Optional[List[str]]) -> List[str]:
+        if not tools:
+            return []
+        from app.models.tool import ToolModel
+        result = await db.execute(select(ToolModel.name).where(ToolModel.is_active == True))
+        active_tool_names = set(result.scalars().all())
+        return [t for t in tools if t in active_tool_names]
+
+    @staticmethod
     async def create_agent(db: AsyncSession, payload: AgentSpecCreate) -> AgentSpecModel:
-        db_agent = AgentSpecModel(**payload.model_dump())
+        data = payload.model_dump()
+        if "tools" in data and data["tools"]:
+            data["tools"] = await AgentService.filter_registered_tools(db, data["tools"])
+        db_agent = AgentSpecModel(**data)
         db.add(db_agent)
         await db.commit()
         await db.refresh(db_agent)
@@ -34,7 +46,10 @@ class AgentService:
         db_agent = await AgentService.get_agent_by_id(db, agent_id)
         if not db_agent:
             return None
-        for key, value in payload.model_dump(exclude_unset=True).items():
+        data = payload.model_dump(exclude_unset=True)
+        if "tools" in data and data["tools"] is not None:
+            data["tools"] = await AgentService.filter_registered_tools(db, data["tools"])
+        for key, value in data.items():
             setattr(db_agent, key, value)
         await db.commit()
         await db.refresh(db_agent)
@@ -82,7 +97,18 @@ class AgentService:
                 messages=[{"role": "system", "content": system_message}, {"role": "user", "content": message_trimmed}],
             )
         except Exception as exc:
-            raise RuntimeError(f"LLM gagal memproses pesan untuk agent '{db_agent.name}': {exc}") from exc
+            if settings.LLM_API_KEY and settings.OPENAI_API_KEY:
+                try:
+                    fallback_client = AsyncOpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL, max_retries=0)
+                    fallback_model = settings.LLM_MODEL
+                    completion = await fallback_client.chat.completions.create(
+                        model=fallback_model,
+                        messages=[{"role": "system", "content": system_message}, {"role": "user", "content": message_trimmed}],
+                    )
+                except Exception as fallback_exc:
+                    raise RuntimeError(f"LLM gagal memproses pesan untuk agent '{db_agent.name}': {fallback_exc}") from fallback_exc
+            else:
+                raise RuntimeError(f"LLM gagal memproses pesan untuk agent '{db_agent.name}': {exc}") from exc
 
         response = completion.choices[0].message.content
         if not response:

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Sidebar } from "@/components/navigation/Sidebar";
 import {
   Rocket,
@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Shield,
   Cloud,
+  Trash2,
 } from "lucide-react";
 
 export default function DeploymentsPage() {
@@ -21,8 +22,61 @@ export default function DeploymentsPage() {
   const [copiedEndpoint, setCopiedEndpoint] = useState(false);
   const [activeSnippetTab, setActiveSnippetTab] = useState<"curl" | "js" | "python">("curl");
 
-  // State deployments murni
   const [deployments, setDeployments] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fetchDeployments = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/deployments");
+      if (res.ok) {
+        const data = await res.json();
+        setDeployments(data);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch deployments:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDeployments();
+  }, []);
+
+  const handleCreateDeployment = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/deployments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent: "New Agent " + Math.floor(Math.random() * 1000),
+          environment: "production",
+          path: "/api/agents/new/run",
+          status: "Ready",
+        }),
+      });
+      if (res.ok) {
+        fetchDeployments();
+      }
+    } catch (err) {
+      console.error("Failed to create deployment:", err);
+    }
+  };
+
+  const handleDeleteDeployment = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this deployment?")) return;
+    try {
+      const res = await fetch(`http://localhost:8000/api/v1/deployments/${id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setDeployments((prev) => prev.filter((d) => d.id !== id));
+      }
+    } catch (err) {
+      console.error("Failed to delete deployment:", err);
+    }
+  };
 
   const sampleEndpoint = "http://localhost:8000/api/agents/bpjs-cs-agent/run";
   const apiKey = "agy_live_9f82a17b8c34e91204";
@@ -80,12 +134,23 @@ print(res.json())`;
                 INTEGRATION & HOSTING
               </span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              Deployments
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl leading-relaxed">
-              Kelola endpoint publik terpublikasi, API key, dan panduan integrasi runtime agent ke sistem eksternal.
-            </p>
+            <div className="flex items-center justify-between w-full">
+              <div>
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                  Deployments
+                </h1>
+                <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl leading-relaxed">
+                  Kelola endpoint publik terpublikasi, API key, dan panduan integrasi runtime agent ke sistem eksternal.
+                </p>
+              </div>
+              <button
+                onClick={handleCreateDeployment}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all shadow-2xs cursor-pointer"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>Publish Agent</span>
+              </button>
+            </div>
           </header>
 
           {/* Section 1: Endpoint & API Key Management Cards */}
@@ -250,7 +315,16 @@ print(res.json())`;
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
-                  {deployments.length === 0 ? (
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-400">
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                          <span>Loading deployments...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : deployments.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="py-16 text-center">
                         <div className="flex flex-col items-center justify-center text-slate-400">
@@ -271,8 +345,16 @@ print(res.json())`;
                         <td className="py-3.5 px-6">{dep.environment}</td>
                         <td className="py-3.5 px-6 font-mono text-[11px] text-slate-600">{dep.path}</td>
                         <td className="py-3.5 px-4">{dep.status}</td>
-                        <td className="py-3.5 px-6 text-slate-400">{dep.deployedAt}</td>
-                        <td className="py-3.5 px-4 text-right">-</td>
+                        <td className="py-3.5 px-6 text-slate-400">{new Date(dep.deployedAt).toLocaleDateString()}</td>
+                        <td className="py-3.5 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDeployment(dep.id)}
+                            className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}

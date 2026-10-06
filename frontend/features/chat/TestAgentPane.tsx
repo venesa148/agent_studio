@@ -343,8 +343,31 @@ export function TestAgentPane({
                   <div className="pt-2 flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setIsPublished(!isPublished);
+                      onClick={async () => {
+                        if (!isPublished) {
+                          try {
+                            const res = await fetch("http://localhost:8000/api/v1/deployments", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                agent: activeAgent?.name || "Unknown Agent",
+                                environment: "production",
+                                path: `/api/agents/${domainSlug || activeAgent?.id}/run`,
+                                status: "Ready"
+                              }),
+                            });
+                            if (res.ok) {
+                              setIsPublished(true);
+                            } else {
+                              alert("Failed to publish agent");
+                            }
+                          } catch (err) {
+                            console.error(err);
+                            alert("Error publishing agent");
+                          }
+                        } else {
+                          setIsPublished(false);
+                        }
                         setShowPublishPopover(false);
                       }}
                       className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-center shadow-2xs transition-colors cursor-pointer text-xs"

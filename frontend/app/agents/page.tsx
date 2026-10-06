@@ -13,13 +13,43 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Edit,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
+
+import { EditAgentModal } from "./EditAgentModal";
 
 export default function AllAgentsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("All Statuses");
   const [agents, setAgents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Edit & Delete state
+  const [editingAgent, setEditingAgent] = useState<any>(null);
+  const [deletingAgent, setDeletingAgent] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!deletingAgent) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`http://localhost:8000/api/v1/agent/${deletingAgent.id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setAgents((prev) => prev.filter((a) => a.id !== deletingAgent.id));
+        setDeletingAgent(null);
+      } else {
+        console.error("Failed to delete agent");
+      }
+    } catch (err) {
+      console.error("Error deleting agent:", err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const fetchAgents = async () => {
     try {
@@ -139,12 +169,13 @@ export default function AllAgentsPage() {
                     <th className="py-3.5 px-4 min-w-[100px]">Model</th>
                     <th className="py-3.5 px-4 min-w-[160px]">Tools</th>
                     <th className="py-3.5 px-6 min-w-[150px]">Created At</th>
+                    <th className="py-3.5 px-6 min-w-[120px] text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
                   {isLoading ? (
                     <tr>
-                      <td colSpan={6} className="py-12 text-center text-slate-400">
+                      <td colSpan={7} className="py-12 text-center text-slate-400">
                         <div className="flex items-center justify-center gap-2 text-xs">
                           <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                           <span>Loading agents from database...</span>
@@ -153,7 +184,7 @@ export default function AllAgentsPage() {
                     </tr>
                   ) : filteredAgents.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-16 text-center">
+                      <td colSpan={7} className="py-16 text-center">
                         <div className="flex flex-col items-center justify-center text-slate-400">
                           <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-center text-slate-400 mb-3">
                             <Bot className="w-6 h-6" />
@@ -215,6 +246,24 @@ export default function AllAgentsPage() {
                             ? new Date(agent.created_at).toLocaleString("id-ID")
                             : "-"}
                         </td>
+                        <td className="py-4 px-6 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => setEditingAgent(agent)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Agent"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => setDeletingAgent(agent)}
+                              className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Agent"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -228,6 +277,56 @@ export default function AllAgentsPage() {
           </section>
         </div>
       </main>
+
+      {/* Edit Agent Modal */}
+      <EditAgentModal
+        agent={editingAgent}
+        isOpen={!!editingAgent}
+        onClose={() => setEditingAgent(null)}
+        onSave={(updatedAgent) => {
+          setAgents((prev) =>
+            prev.map((a) => (a.id === updatedAgent.id ? updatedAgent : a))
+          );
+          setEditingAgent(null);
+        }}
+      />
+
+      {/* Delete Confirmation Modal */}
+      {deletingAgent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 text-center space-y-4">
+              <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center mx-auto text-rose-600 mb-2">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900">Delete Agent?</h3>
+              <p className="text-sm text-slate-500">
+                Are you sure you want to delete <span className="font-semibold text-slate-700">{deletingAgent.name}</span>? This action cannot be undone.
+              </p>
+            </div>
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setDeletingAgent(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="flex items-center justify-center min-w-[80px] px-4 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-xs cursor-pointer"
+              >
+                {isDeleting ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  "Delete"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

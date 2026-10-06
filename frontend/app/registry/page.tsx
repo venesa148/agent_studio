@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { Sidebar } from "@/components/navigation/Sidebar";
 import { RegisterMcpModal } from "@/features/tools/RegisterMcpModal";
 import { ImportOpenApiModal } from "@/features/tools/ImportOpenApiModal";
+import { EditToolModal } from "@/features/tools/EditToolModal";
 import { CustomToolModal } from "@/features/tools/CustomToolModal";
 import {
   Plus,
@@ -12,6 +13,8 @@ import {
   Wrench,
   Globe,
   RefreshCw,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 export type ToolsTab = "all_tools" | "mcp_servers";
@@ -25,6 +28,9 @@ export default function ToolsRegistryPage() {
   const [showRegisterMcpModal, setShowRegisterMcpModal] = useState(false);
   const [showImportOpenApiModal, setShowImportOpenApiModal] = useState(false);
   const [showCustomToolModal, setShowCustomToolModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingTool, setEditingTool] = useState<any | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Unified tables state
   const [tools, setTools] = useState<any[]>([]);
@@ -110,6 +116,49 @@ export default function ToolsRegistryPage() {
     const tool = await res.json();
     setTools((previous) => [tool, ...previous]);
     setActiveTab("all_tools");
+  };
+
+  const handleUpdateTool = async (toolId: string, updatedData: { name: string; description: string }) => {
+    const res = await fetch(`${API_URL}/tools/${toolId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedData),
+    });
+    if (!res.ok) throw new Error(await readError(res));
+    const updatedTool = await res.json();
+    setTools((prev) => prev.map((t) => (t.id === toolId ? updatedTool : t)));
+  };
+
+  const handleDeleteTool = async (toolId: string, toolName: string) => {
+    if (!confirm(`Apakah Anda yakin ingin menghapus tool '${toolName}'?`)) return;
+    setDeletingId(toolId);
+    try {
+      const res = await fetch(`${API_URL}/tools/${toolId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      setTools((prev) => prev.filter((t) => t.id !== toolId));
+    } catch (err: any) {
+      alert(err.message || "Gagal menghapus tool.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleDeleteMcpServer = async (serverId: string, serverName: string) => {
+    if (!confirm(`Apakah Anda yakin ingin menghapus MCP server '${serverName}'? Tools yang terhubung juga akan dihapus.`)) return;
+    setDeletingId(serverId);
+    try {
+      const res = await fetch(`${API_URL}/mcp/${serverId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      setMcpServers((prev) => prev.filter((s) => s.id !== serverId));
+    } catch (err: any) {
+      alert(err.message || "Gagal menghapus MCP server.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -250,12 +299,13 @@ export default function ToolsRegistryPage() {
                       <th className="py-3 px-6 min-w-[120px]">AUTH</th>
                       <th className="py-3 px-6 min-w-[120px]">HEALTH</th>
                       <th className="py-3 px-6 min-w-[120px]">USED BY</th>
+                      <th className="py-3 px-6 min-w-[100px] text-right">ACTIONS</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
                     {isLoading ? (
                       <tr>
-                        <td colSpan={5} className="py-12 text-center text-slate-400">
+                        <td colSpan={6} className="py-12 text-center text-slate-400">
                           <div className="flex items-center justify-center gap-2">
                             <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                             <span>Loading tools...</span>
@@ -264,7 +314,7 @@ export default function ToolsRegistryPage() {
                       </tr>
                     ) : tools.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="py-16 text-center">
+                        <td colSpan={6} className="py-16 text-center">
                           <div className="flex flex-col items-center justify-center text-slate-400">
                             <Wrench className="w-8 h-8 mb-2 text-slate-300" />
                             <p className="text-xs font-semibold text-slate-600">
@@ -324,6 +374,30 @@ export default function ToolsRegistryPage() {
                           <td className="py-3.5 px-6 text-slate-500 text-xs">
                             {tool.used_by || tool.usedBy || "0 agents"}
                           </td>
+                          <td className="py-3.5 px-6 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                title="Edit tool"
+                                onClick={() => {
+                                  setEditingTool(tool);
+                                  setShowEditModal(true);
+                                }}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Hapus tool"
+                                disabled={deletingId === tool.id}
+                                onClick={() => handleDeleteTool(tool.id, tool.name)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50 transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))
                     )}
@@ -344,6 +418,7 @@ export default function ToolsRegistryPage() {
                       <th className="py-3 px-6 min-w-[220px]">ENDPOINT URL</th>
                       <th className="py-3 px-4 min-w-[130px]">STATUS</th>
                       <th className="py-3 px-4 min-w-[110px]">CREATED AT</th>
+                      <th className="py-3 px-4 min-w-[80px] text-right">ACTIONS</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
@@ -399,6 +474,17 @@ export default function ToolsRegistryPage() {
                           <td className="py-3.5 px-4 text-slate-400 text-[11px]">
                             {server.created_at ? new Date(server.created_at).toLocaleDateString() : "-"}
                           </td>
+                          <td className="py-3.5 px-4 text-right">
+                            <button
+                              type="button"
+                              title="Hapus MCP Server"
+                              disabled={deletingId === server.id}
+                              onClick={() => handleDeleteMcpServer(server.id, server.name)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
                         </tr>
                       ))
                     )}
@@ -429,6 +515,17 @@ export default function ToolsRegistryPage() {
         isOpen={showCustomToolModal}
         onClose={() => setShowCustomToolModal(false)}
         onSaveTool={handleSaveCustomTool}
+      />
+
+      {/* 6. Modal 4: Edit Tool */}
+      <EditToolModal
+        isOpen={showEditModal}
+        tool={editingTool}
+        onClose={() => {
+          setShowEditModal(false);
+          setEditingTool(null);
+        }}
+        onSaveTool={handleUpdateTool}
       />
     </div>
   );
