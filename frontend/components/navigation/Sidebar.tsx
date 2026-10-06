@@ -25,6 +25,7 @@ interface SidebarProps {
 export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(collapsed);
+  const [showWorkflowToast, setShowWorkflowToast] = useState(false);
 
   const handleToggle = () => {
     setIsCollapsed(!isCollapsed);
@@ -41,10 +42,11 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
     },
     {
       name: "Workflows",
-      href: "/workflows",
+      href: "#",
       icon: GitBranch,
       count: 6,
-      active: pathname === "/workflows",
+      isTestOnly: true,
+      active: false,
     },
     {
       name: "Tools",
@@ -122,6 +124,13 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
               <Link
                 key={item.name}
                 href={item.href}
+                onClick={(e) => {
+                  if ((item as any).isTestOnly) {
+                    e.preventDefault();
+                    setShowWorkflowToast(true);
+                    setTimeout(() => setShowWorkflowToast(false), 2500);
+                  }
+                }}
                 className={`flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-colors ${item.active
                     ? "bg-blue-50/80 text-blue-700 font-semibold"
                     : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900"
@@ -215,6 +224,14 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
           </div>
         )}
       </div>
+
+      {/* Toast Feedback for Workflow testing */}
+      {showWorkflowToast && (
+        <div className="absolute bottom-16 left-3 right-3 p-2.5 rounded-xl bg-slate-900 text-white text-[11px] shadow-lg flex items-center justify-between z-50 animate-in fade-in duration-200">
+          <span>Workflow: Mode Test (Fase 4)</span>
+          <span className="text-[10px] text-blue-400 font-medium">Tetap di halaman</span>
+        </div>
+      )}
     </aside>
   );
 }

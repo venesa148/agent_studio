@@ -20,8 +20,8 @@ export default function AllAgentsPage() {
   const [selectedVersion, setSelectedVersion] = useState("All Versions");
   const [sortBy, setSortBy] = useState("Last Updated");
 
-  // State agen tanpa data dummy
-  const [agents] = useState<any[]>([]);
+  // State agen murni frontend (tanpa data dummy, siap menerima data)
+  const [agents, setAgents] = useState<any[]>([]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#fafbfe]">

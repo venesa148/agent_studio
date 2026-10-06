@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import {
   MessageSquare,
   Workflow,
@@ -21,8 +22,11 @@ import {
   Check,
   X,
   ChevronDown,
-  ChevronRight,
   ExternalLink,
+  Rocket,
+  Globe,
+  Lock,
+  Plus,
 } from "lucide-react";
 
 export type TestPaneTab = "chat" | "simulations" | "trace";
@@ -52,7 +56,12 @@ export function TestAgentPane({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const [isPublished, setIsPublished] = useState(false);
+  const [showPublishPopover, setShowPublishPopover] = useState(false);
+  const [domainSlug, setDomainSlug] = useState("bpjs-customer-service-agent");
   const [selectedRunId, setSelectedRunId] = useState("run-104");
+  const [accessLevel, setAccessLevel] = useState<"Public" | "Restricted">("Public");
+  const [showAccessDropdown, setShowAccessDropdown] = useState(false);
 
   // Initial demo simulations from PRD
   const [simulations, setSimulations] = useState([
@@ -257,6 +266,157 @@ export function TestAgentPane({
             <Activity className="w-3.5 h-3.5" />
             <span>Trace</span>
           </button>
+
+          {/* Ikon / Tombol Publish persis di samping Tab Trace */}
+          <div className="relative">
+            <button
+              onClick={() => setShowPublishPopover(!showPublishPopover)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-2xs ${
+                isPublished
+                  ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  : "bg-blue-600 hover:bg-blue-700 text-white"
+              }`}
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Publish</span>
+            </button>
+
+            {/* Publish Popover Dialog matching design */}
+            {showPublishPopover && (
+              <>
+                <div
+                  className="fixed inset-0 z-30"
+                  onClick={() => setShowPublishPopover(false)}
+                />
+                <div className="absolute right-0 top-10 mt-1 w-80 sm:w-96 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl z-40 text-xs space-y-4 animate-in fade-in zoom-in-95 duration-150">
+                  {/* Header */}
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-bold text-slate-900">Publish</h4>
+                    <Link
+                      href="/deployments"
+                      onClick={() => setShowPublishPopover(false)}
+                      className="text-slate-500 hover:text-blue-600 flex items-center gap-1 text-[11px] font-medium"
+                    >
+                      <span>Settings</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </Link>
+                  </div>
+
+                  {/* Domain / Slug Input */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <label className="font-semibold text-slate-700">Domain / Slug</label>
+                      <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                        <Check className="w-3 h-3 stroke-[2.5]" />
+                        Available
+                      </span>
+                    </div>
+
+                    <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden bg-white focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
+                      <input
+                        type="text"
+                        value={domainSlug}
+                        onChange={(e) => setDomainSlug(e.target.value)}
+                        className="flex-1 px-3 py-2 text-xs font-mono text-slate-800 outline-hidden bg-transparent min-w-0"
+                      />
+                      <span className="px-3 py-2 bg-slate-50 border-l border-slate-200 text-slate-500 font-mono text-[11px] shrink-0">
+                        .agentstudio.app
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1 font-medium pt-0.5 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add a custom domain</span>
+                    </button>
+                  </div>
+
+                  {/* Access Level Selector */}
+                  <div className="space-y-1.5">
+                    <label className="font-semibold text-slate-700 text-[11px]">
+                      Who can access your app
+                    </label>
+
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowAccessDropdown(!showAccessDropdown)}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-slate-50 flex items-center justify-between text-left transition-colors"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Globe className="w-4 h-4 text-slate-600 shrink-0" />
+                          <div>
+                            <div className="font-semibold text-slate-900">{accessLevel}</div>
+                            <div className="text-[10px] text-slate-400">
+                              {accessLevel === "Public"
+                                ? "Anyone on the internet with the URL"
+                                : "Only authorized API Key / workspace"}
+                            </div>
+                          </div>
+                        </div>
+                        <ChevronDown className="w-4 h-4 text-slate-400" />
+                      </button>
+
+                      {showAccessDropdown && (
+                        <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-50">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAccessLevel("Public");
+                              setShowAccessDropdown(false);
+                            }}
+                            className="w-full px-3 py-2 text-left hover:bg-slate-50 flex flex-col"
+                          >
+                            <span className="font-semibold text-slate-900">Public</span>
+                            <span className="text-[10px] text-slate-400">
+                              Anyone on the internet with the URL
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAccessLevel("Restricted");
+                              setShowAccessDropdown(false);
+                            }}
+                            className="w-full px-3 py-2 text-left hover:bg-slate-50 flex flex-col border-t border-slate-100"
+                          >
+                            <span className="font-semibold text-slate-900">Restricted</span>
+                            <span className="text-[10px] text-slate-400">
+                              Requires valid Authorization Bearer key
+                            </span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Footer Action Buttons */}
+                  <div className="pt-2 flex items-center gap-2">
+                    <Link
+                      href="/deployments"
+                      onClick={() => setShowPublishPopover(false)}
+                      className="flex-1 py-2 px-3 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold text-center transition-colors"
+                    >
+                      Review security
+                    </Link>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsPublished(!isPublished);
+                        setShowPublishPopover(false);
+                      }}
+                      className="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-center shadow-2xs transition-colors cursor-pointer"
+                    >
+                      {isPublished ? "Update / Unpublish" : "Publish"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
