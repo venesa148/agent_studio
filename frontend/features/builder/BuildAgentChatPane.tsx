@@ -42,6 +42,40 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentCh
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [dbTools, setDbTools] = useState<any[]>([]);
 
+  const skipClearRef = React.useRef(false);
+  const currentAgentIdRef = React.useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!activeAgent) {
+      if (currentAgentIdRef.current !== undefined) {
+        setMessages([]);
+        setInput("");
+        setErrorMessage(null);
+        setSaveSuccessMsg(null);
+      }
+      currentAgentIdRef.current = undefined;
+      return;
+    }
+
+    if (currentAgentIdRef.current !== activeAgent.id) {
+      if (!skipClearRef.current) {
+        setMessages([
+          {
+            id: `system-spec-${activeAgent.id}`,
+            sender: "builder",
+            text: `Berikut adalah konfigurasi aktif untuk Agent '${activeAgent.name}'. Anda dapat langsung mengubahnya melalui form di bawah ini, atau memberi instruksi perubahan melalui chat.`,
+            spec: activeAgent,
+            time: "Sistem",
+          }
+        ]);
+        setInput("");
+        setErrorMessage(null);
+        setSaveSuccessMsg(null);
+      }
+      currentAgentIdRef.current = activeAgent.id;
+    }
+  }, [activeAgent]);
+
   useEffect(() => {
     fetch("http://localhost:8000/api/v1/tools")
       .then((res) => (res.ok ? res.json() : []))
@@ -87,13 +121,18 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentCh
     const lastSpecMsg = messages.slice().reverse().find((m) => m.spec);
     const currentSpec = lastSpecMsg ? lastSpecMsg.spec : activeAgent || null;
 
+    const history = messages.map((m) => ({
+      role: m.sender === "user" ? "user" : "assistant",
+      content: m.text,
+    }));
+
     try {
       const res = await fetch("http://localhost:8000/api/v1/builder/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt: currentInput, current_spec: currentSpec }),
+        body: JSON.stringify({ prompt: currentInput, current_spec: currentSpec, history }),
       });
 
       if (!res.ok) {
@@ -168,7 +207,14 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentCh
       }
 
       const savedSpec: AgentSpecData = await res.json();
+      
+      skipClearRef.current = true;
       onAgentCreated?.(savedSpec);
+      
+      setTimeout(() => {
+        skipClearRef.current = false;
+      }, 500);
+
       setSaveSuccessMsg(`Agent '${savedSpec.name}' berhasil disimpan ke database.`);
       setTimeout(() => setSaveSuccessMsg(null), 4000);
     } catch (e: any) {

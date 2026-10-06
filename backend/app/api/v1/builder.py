@@ -22,7 +22,7 @@ async def builder_chat(payload: BuilderChatRequest, db: AsyncSession = Depends(g
     dan menyimpannya secara otomatis ke database.
     """
     try:
-        return await BuilderService.build_agent_spec(db, payload.prompt, payload.current_spec)
+        return await BuilderService.build_agent_spec(db, payload.prompt, payload.current_spec, payload.history)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:

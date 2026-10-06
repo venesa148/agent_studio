@@ -107,7 +107,7 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
       {/* Primary Action: New Agent Button */}
       <div className="p-3">
         <Link
-          href="/"
+          href="/?new=true"
           className={`flex items-center justify-center gap-2 w-full py-2 px-3 rounded-full border border-blue-200 bg-white hover:bg-blue-50/70 text-blue-600 font-medium text-sm transition-all shadow-2xs hover:shadow-xs group`}
         >
           <Plus className="w-4 h-4 text-blue-600 group-hover:rotate-90 transition-transform duration-200" />

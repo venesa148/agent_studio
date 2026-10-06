@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Sidebar } from "@/components/navigation/Sidebar";
 import { ConfigureNav, ConfigureTab } from "@/components/navigation/ConfigureNav";
 import { BuildAgentChatPane } from "@/features/builder/BuildAgentChatPane";
@@ -26,6 +27,10 @@ export default function HomePage() {
   const [activeAgent, setActiveAgent] = useState<AgentSpecData | null>(null);
   const [isLoadingAgents, setIsLoadingAgents] = useState(true);
 
+  const searchParams = useSearchParams();
+  const agentId = searchParams ? searchParams.get("id") : null;
+  const isNewQuery = searchParams ? searchParams.get("new") === "true" : false;
+
   const fetchAgents = async () => {
     try {
       setIsLoadingAgents(true);
@@ -33,26 +38,43 @@ export default function HomePage() {
       if (res.ok) {
         const data: AgentSpecData[] = await res.json();
         setAgents(data);
-        if (data.length > 0) {
-          setActiveAgent((prev) => {
-            if (prev) {
-              const updated = data.find((a) => a.id === prev.id);
-              if (updated) return updated;
-            }
-            return data[0];
-          });
-        }
+        return data;
       }
     } catch (err) {
       console.warn("Failed to fetch agents:", err);
     } finally {
       setIsLoadingAgents(false);
     }
+    return [];
   };
 
   useEffect(() => {
-    fetchAgents();
-  }, []);
+    fetchAgents().then((data) => {
+      if (agentId && data.length > 0) {
+        const found = data.find(a => a.id === agentId);
+        setActiveAgent(found || null);
+      } else {
+        setActiveAgent(null);
+      }
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen to URL changes for agent selection or 'new' explicitly
+  useEffect(() => {
+    if (isNewQuery) {
+      setActiveAgent(null);
+      if (typeof window !== "undefined") {
+        window.history.replaceState({}, '', '/');
+      }
+    } else if (agentId) {
+      if (agents.length > 0) {
+        const found = agents.find(a => a.id === agentId);
+        setActiveAgent(found || null);
+      }
+    } else {
+      setActiveAgent(null);
+    }
+  }, [agentId, isNewQuery, agents]);
 
   const handleAgentCreatedOrUpdated = (agent: AgentSpecData) => {
     setAgents((prev) => {
@@ -65,6 +87,16 @@ export default function HomePage() {
       return [agent, ...prev];
     });
     setActiveAgent(agent);
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, '', `/?id=${agent.id}`);
+    }
+  };
+
+  const handleClearActiveAgent = () => {
+    setActiveAgent(null);
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, '', '/');
+    }
   };
 
   return (
@@ -82,13 +114,19 @@ export default function HomePage() {
       <BuildAgentChatPane
         activeAgent={activeAgent}
         onAgentCreated={handleAgentCreatedOrUpdated}
+        onClearActiveAgent={handleClearActiveAgent}
       />
 
       {/* 4. Pane Chat Test Agent (Kanan) */}
       <TestAgentPane
         activeAgent={activeAgent}
         agents={agents}
-        onSelectAgent={(agent) => setActiveAgent(agent)}
+        onSelectAgent={(agent) => {
+          setActiveAgent(agent);
+          if (typeof window !== "undefined") {
+            window.history.pushState({}, '', `/?id=${agent.id}`);
+          }
+        }}
         isLoadingAgents={isLoadingAgents}
       />
     </div>

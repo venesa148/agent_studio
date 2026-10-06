@@ -48,14 +48,19 @@ class AgentSpecResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
 class BuilderChatRequest(BaseModel):
     prompt: str
     current_spec: Optional[AgentSpec] = None
+    history: Optional[List[ChatMessage]] = None
 
 class BuilderChatResponse(BaseModel):
-    id: str
+    id: Optional[str] = None
     message: str
-    spec: AgentSpecResponse
+    spec: Optional[AgentSpecResponse] = None
 
 class AgentTestRequest(BaseModel):
     agent_id: str

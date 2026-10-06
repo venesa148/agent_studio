@@ -129,53 +129,152 @@ class BuilderService:
 
     @staticmethod
     async def build_agent_spec(
-        db: AsyncSession, prompt: str, current_spec: Optional[AgentSpec] = None
+        db: AsyncSession, prompt: str, current_spec: Optional[AgentSpec] = None, history: Optional[List[Any]] = None
     ) -> BuilderChatResponse:
         prompt_trimmed = prompt.strip()
         if not prompt_trimmed:
             raise ValueError("Prompt tidak boleh kosong.")
 
-        # Ambil tools aktif langsung dari database
         db_tools_result = await db.execute(select(ToolModel).where(ToolModel.is_active == True))
-        valid_db_tools = {t.name for t in db_tools_result.scalars().all()}
+        db_tools = db_tools_result.scalars().all()
+        valid_db_tools = {t.name: (t.description or "") for t in db_tools}
+        
+        client = None
+        model = None
+        if settings.OPENAI_API_KEY:
+            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=0)
+            model = settings.OPENAI_DEFAULT_MODEL
+        elif settings.LLM_API_KEY:
+            client = AsyncOpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL, max_retries=0)
+            model = settings.LLM_MODEL
 
+        if client and model:
+            tools_info = ", ".join([f"{k} ({v})" for k,v in valid_db_tools.items()])
+            current_spec_json = current_spec.model_dump_json() if current_spec else "None"
+            system_msg = (
+                "Anda adalah 'Agent Builder', asisten ahli untuk membuat dan merancang AI Agent. "
+                "Diskusikan kebutuhan pengguna, kumpulkan informasi, dan rancang spesifikasi agent.\n\n"
+                "Kewajiban utama: Anda HARUS SELALU membalas dalam format JSON di dalam blok markdown ```json ... ```:\n"
+                "{\n"
+                '  "message": "Pesan Anda ke pengguna (bahasa Indonesia, misal bertanya klarifikasi atau infokan bahwa spesifikasi telah dibuat)",\n'
+                '  "spec_updated": true atau false (true jika Anda membuat/mengubah spesifikasi agent),\n'
+                '  "spec": {\n'
+                '    "name": "Nama Agent",\n'
+                '    "description": "Deskripsi Agent",\n'
+                '    "instructions": "System prompt lengkap untuk agent tersebut (peran, tugas, perilaku)",\n'
+                '    "tools": ["tool_a", "tool_b"]\n'
+                '  }\n'
+                "}\n\n"
+                "Aturan:\n"
+                "1. 'message' adalah balasan teks normal yang akan dibaca pengguna.\n"
+                "2. Jika pengguna belum jelas, set 'spec_updated': false dan tanyakan detailnya di 'message'.\n"
+                "3. Jika Anda siap membuat/mengupdate agent, set 'spec_updated': true.\n"
+                f"4. Tool yang tersedia HANYA: {tools_info}.\n"
+                "5. 'tools' di dalam spec HANYA boleh berisi nama-nama tool dari daftar di atas. Jika tidak ada yang relevan, kosongkan [].\n"
+                f"6. Spesifikasi agent yang sedang aktif (jika ada): {current_spec_json}\n"
+            )
+            
+            messages = [{"role": "system", "content": system_msg}]
+            if history:
+                for h in history:
+                    messages.append({"role": h.role if hasattr(h, 'role') else h.get('role', 'user'), "content": h.content if hasattr(h, 'content') else h.get('content', '')})
+            
+            messages.append({"role": "user", "content": prompt_trimmed})
+            
+            try:
+                completion = await client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.2
+                )
+                content = completion.choices[0].message.content or ""
+                match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
+                if not match:
+                    match = re.search(r"({.*})", content, re.DOTALL)
+                    
+                if match:
+                    parsed = json.loads(match.group(1))
+                    message = parsed.get("message", "Saya telah memproses permintaan Anda.")
+                    spec_updated = parsed.get("spec_updated", False)
+                    
+                    if spec_updated and "spec" in parsed:
+                        spec_data = parsed["spec"]
+                        name = spec_data.get("name", "Custom Agent")
+                        description = spec_data.get("description", "")
+                        instructions = spec_data.get("instructions", "")
+                        tools = [t for t in spec_data.get("tools", []) if t in valid_db_tools]
+                        
+                        db_agent = None
+                        if current_spec and current_spec.id:
+                            # Update existing
+                            result = await db.execute(select(AgentSpecModel).where(AgentSpecModel.id == current_spec.id))
+                            db_agent = result.scalar_one_or_none()
+                        
+                        if db_agent:
+                            db_agent.name = name
+                            db_agent.description = description
+                            db_agent.instructions = instructions
+                            db_agent.tools = tools
+                        else:
+                            db_agent = AgentSpecModel(
+                                name=name, description=description, instructions=instructions,
+                                model="gpt-4o-mini", tools=tools, mcp_servers=[], harness="default-safe-v1", status="active"
+                            )
+                            db.add(db_agent)
+                            
+                        await db.commit()
+                        await db.refresh(db_agent)
+                        spec_response = AgentSpecResponse.model_validate(db_agent)
+                        return BuilderChatResponse(id=db_agent.id, message=message, spec=spec_response)
+                    else:
+                        return BuilderChatResponse(message=message)
+                        
+            except Exception as e:
+                print(f"LLM Builder Error: {e}")
+                # Fallback ke logic lama
+                pass
+
+        # Fallback Logic (Naive)
         if current_spec and current_spec.id:
             name = current_spec.name
             description = current_spec.description or f"Agent untuk: {prompt_trimmed}"
             instructions = "\n\n".join(
                 part for part in [current_spec.instructions or "", prompt_trimmed] if part
             )
-            # Filter tools yang sudah ada agar hanya menggunakan tool yang terdaftar di database
             existing_tools = [t for t in (current_spec.tools or []) if t in valid_db_tools]
             new_selected_tools = await BuilderService._select_tools_from_db(db, prompt_trimmed)
-            # Gabungkan tools tanpa duplikat
             merged_tools = list(dict.fromkeys(existing_tools + new_selected_tools))
             tools = merged_tools
             mcp_servers = current_spec.mcp_servers
-            model, harness, status = current_spec.model, current_spec.harness, current_spec.status
+            agent_model, harness, status = current_spec.model, current_spec.harness, current_spec.status
+            
+            result = await db.execute(select(AgentSpecModel).where(AgentSpecModel.id == current_spec.id))
+            db_agent = result.scalar_one_or_none()
+            if db_agent:
+                db_agent.name = name
+                db_agent.description = description
+                db_agent.instructions = instructions
+                db_agent.tools = tools
+                await db.commit()
+                await db.refresh(db_agent)
+            else:
+                db_agent = AgentSpecModel(name=name, description=description, instructions=instructions, model=agent_model, tools=tools, mcp_servers=mcp_servers, harness=harness, status=status)
+                db.add(db_agent)
+                await db.commit()
+                await db.refresh(db_agent)
         else:
             name = BuilderService._agent_name(prompt_trimmed)
             description = f"Agent untuk: {prompt_trimmed}"
-            instructions = (
-                f"Peran dan tujuan agent ini berasal dari permintaan pengguna: {prompt_trimmed}\n\n"
-                "Jawab sesuai peran tersebut. Jika informasi atau kemampuan yang diperlukan "
-                "tidak tersedia, jelaskan keterbatasannya tanpa mengarang hasil."
-            )
-            # Ambil tools murni dari database sesuai prompt pengguna
+            instructions = f"Peran dan tujuan agent ini berasal dari permintaan pengguna: {prompt_trimmed}\n\nJawab sesuai peran tersebut."
             tools = await BuilderService._select_tools_from_db(db, prompt_trimmed)
-            mcp_servers = []
-            model, harness, status = "gpt-4o-mini", "default-safe-v1", "active"
+            db_agent = AgentSpecModel(name=name, description=description, instructions=instructions, model="gpt-4o-mini", tools=tools, mcp_servers=[], harness="default-safe-v1", status="active")
+            db.add(db_agent)
+            await db.commit()
+            await db.refresh(db_agent)
 
-        db_agent = AgentSpecModel(
-            name=name, description=description, instructions=instructions, model=model,
-            tools=tools, mcp_servers=mcp_servers, harness=harness, status=status,
-        )
-        db.add(db_agent)
-        await db.commit()
-        await db.refresh(db_agent)
         spec_response = AgentSpecResponse.model_validate(db_agent)
         return BuilderChatResponse(
             id=db_agent.id,
-            message=f"Agent '{db_agent.name}' dibuat dari permintaan Anda dan disimpan ke database.",
+            message=f"Agent '{db_agent.name}' dibuat/diupdate dari permintaan Anda.",
             spec=spec_response,
         )

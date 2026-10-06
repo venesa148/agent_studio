@@ -123,7 +123,7 @@ export default function AllAgentsPage() {
             </div>
 
             <Link
-              href="/"
+              href="/?new=true"
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs sm:text-sm transition-all shadow-xs hover:shadow-sm shrink-0"
             >
               <Plus className="w-4 h-4" />
@@ -196,7 +196,7 @@ export default function AllAgentsPage() {
                             Mulai buat agent baru dengan menekan tombol Create Agent.
                           </p>
                           <Link
-                            href="/"
+                            href="/?new=true"
                             className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors shadow-2xs"
                           >
                             <Plus className="w-4 h-4" />
