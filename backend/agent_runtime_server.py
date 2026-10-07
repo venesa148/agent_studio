@@ -80,6 +80,7 @@ class AgentRuntimeEngine:
         self.name: str = "Unknown Agent"
         self.status: str = "initializing"
         self.version: int = 1
+        self.system_prompt: str = ""
         self.nodes_by_id: Dict[str, Dict[str, Any]] = {}
         self.entry_node: str = ""
         self.load_config()
@@ -96,16 +97,48 @@ class AgentRuntimeEngine:
                 data = self._fallback_spec()
 
             self.raw_spec = data or {}
-            self.agent_id = self.raw_spec.get("agent_id", "bpjs-triase-rs-001")
-            self.name = self.raw_spec.get("name", "Agent Triase BPJS RS")
-            self.version = self.raw_spec.get("version", 1)
-            self.status = "active"
 
-            # Parse flow graph
+            # 1. Mendukung format standar baru (metadata block) dan format legacy
+            metadata = self.raw_spec.get("metadata", {})
+            self.agent_id = metadata.get("id") or self.raw_spec.get("agent_id", "default-agent-001")
+            self.name = metadata.get("name") or self.raw_spec.get("name", "AI Assistant")
+            self.version = metadata.get("version") or self.raw_spec.get("version", 1)
+            self.status = metadata.get("status") or self.raw_spec.get("status", "active")
+            self.description = metadata.get("description") or self.raw_spec.get("description", "")
+
+            # 2. Parse system prompt / instructions secara dinamis dari spesifikasi YAML
+            instructions = self.raw_spec.get("instructions")
+            if isinstance(instructions, str) and instructions.strip():
+                self.system_prompt = instructions.strip()
+            elif isinstance(instructions, dict):
+                self.system_prompt = instructions.get("system", "") or instructions.get("instruction", "")
+            else:
+                self.system_prompt = self.raw_spec.get("system_prompt", "")
+
+            if not self.system_prompt:
+                self.system_prompt = (
+                    f"Kamu adalah {self.name}. Berikan respon yang informatif, profesional, "
+                    "dan membantu sesuai dengan arahan peran Anda."
+                )
+
+            # 3. Parse flow graph
             flow = self.raw_spec.get("flow", {})
             self.entry_node = flow.get("entry_node", "")
             nodes = flow.get("nodes", [])
             self.nodes_by_id = {node["id"]: node for node in nodes if "id" in node}
+
+            # Buat auto flow jika graph belum didefinisikan secara eksplisit
+            if not self.nodes_by_id:
+                self.entry_node = "main_step"
+                self.nodes_by_id = {
+                    "main_step": {
+                        "id": "main_step",
+                        "type": "llm_step",
+                        "instruction": "Tanggapi pesan pengguna secara akurat sesuai dengan peran dan instruksi Anda.",
+                        "next": "selesai"
+                    },
+                    "selesai": {"id": "selesai", "type": "end"}
+                }
 
             logger.info(
                 f"[Agent Runtime] Berhasil memuat config: '{self.name}' "
@@ -117,18 +150,25 @@ class AgentRuntimeEngine:
 
     def _fallback_spec(self) -> Dict[str, Any]:
         return {
-            "agent_id": "default-agent-001",
-            "name": "Default Assistant",
-            "version": 1,
-            "status": "active",
-            "system_prompt": "Anda adalah asisten medis yang ramah.",
+            "spec_version": "v1.0",
+            "metadata": {
+                "id": "default-assistant-001",
+                "name": "General AI Assistant",
+                "version": 1,
+                "status": "active",
+                "description": "Asisten serbaguna yang siap memproses dan menjawab kebutuhan pengguna."
+            },
+            "configuration": {
+                "model": "gpt-4o-mini"
+            },
+            "instructions": "Kamu adalah asisten AI yang cerdas, ramah, dan profesional. Bantu pengguna dengan solusi yang tepat.",
             "flow": {
-                "entry_node": "terima_keluhan",
+                "entry_node": "main_step",
                 "nodes": [
                     {
-                        "id": "terima_keluhan",
+                        "id": "main_step",
                         "type": "llm_step",
-                        "instruction": "Tanggapi keluhan pengguna dengan empati.",
+                        "instruction": "Tanggapi pesan pengguna dengan jelas dan solutif.",
                         "next": "selesai"
                     },
                     {"id": "selesai", "type": "end"}
@@ -137,9 +177,21 @@ class AgentRuntimeEngine:
         }
 
     async def execute_llm_step(self, instruction: str, system_prompt: str, user_message: str, context: Dict[str, Any]) -> str:
-        """Memanggil LLM (Anthropic / OpenAI) atau fallback jika key belum disetel."""
+        """Memanggil LLM (Anthropic / OpenAI / OpenRouter) sesuai model di YAML atau fallback lokal."""
         anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
         openai_key = os.getenv("OPENAI_API_KEY", "")
+
+        # Ekstrak model dari configuration atau model
+        model_cfg = self.raw_spec.get("configuration", {}).get("model") or self.raw_spec.get("model", {})
+        if isinstance(model_cfg, dict):
+            model_name = model_cfg.get("name", "gpt-4o-mini")
+            max_tokens = model_cfg.get("max_tokens", 1024)
+        elif isinstance(model_cfg, str) and model_cfg:
+            model_name = model_cfg
+            max_tokens = 1024
+        else:
+            model_name = "gpt-4o-mini"
+            max_tokens = 1024
 
         # 1. Coba Anthropic jika terkonfigurasi
         if anthropic_key and anthropic_key != "sk-ant-...":
@@ -151,9 +203,10 @@ class AgentRuntimeEngine:
                     f"Konteks riwayat: {json.dumps(context, ensure_ascii=False)}\n"
                     f"Pesan pengguna: {user_message}"
                 )
+                claude_model = model_name if "claude" in model_name else "claude-3-5-sonnet-20241022"
                 msg = await client.messages.create(
-                    model=self.raw_spec.get("model", {}).get("name", "claude-sonnet-4-5"),
-                    max_tokens=self.raw_spec.get("model", {}).get("max_tokens", 1024),
+                    model=claude_model,
+                    max_tokens=max_tokens,
                     system=system_prompt,
                     messages=[{"role": "user", "content": prompt_full}]
                 )
@@ -167,7 +220,10 @@ class AgentRuntimeEngine:
                 from openai import AsyncOpenAI
                 is_openrouter = openai_key.startswith("sk-or-")
                 base_url = "https://openrouter.ai/api/v1" if is_openrouter else os.getenv("OPENAI_BASE_URL")
-                model_name = "openai/gpt-4o-mini" if is_openrouter else "gpt-4o-mini"
+
+                target_model = model_name
+                if is_openrouter and "/" not in target_model:
+                    target_model = f"openai/{target_model}"
 
                 client = AsyncOpenAI(api_key=openai_key, base_url=base_url)
                 prompt_full = (
@@ -176,34 +232,24 @@ class AgentRuntimeEngine:
                     f"Pesan pengguna: {user_message}"
                 )
                 res = await client.chat.completions.create(
-                    model=model_name,
+                    model=target_model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt_full}
-                    ]
+                    ],
+                    max_tokens=max_tokens,
+                    temperature=0.3
                 )
                 return res.choices[0].message.content or ""
             except Exception as e:
                 logger.warning(f"Gagal memanggil OpenAI/OpenRouter ({e}), menggunakan runtime responder...")
 
-        # 3. Fallback deterministic generator untuk pengujian triase BPJS tanpa API Key
-        lowered = user_message.lower()
-        if "pusing" in lowered or "demam" in lowered or "batuk" in lowered:
-            return (
-                "Terima kasih telah menyampaikan keluhan Anda. Saya mencatat Anda mengalami gejala "
-                f"'{user_message}'. Untuk memastikan penanganan yang tepat, apakah gejala ini sudah berlangsung "
-                "lebih dari 3 hari, atau disertai sesak napas / demam tinggi?"
-            )
-        elif "darurat" in lowered or "sesak" in lowered or "parah" in lowered or "sakit sekali" in lowered:
-            return (
-                "Berdasarkan keluhan yang Anda rasakan, kondisi ini memerlukan pemeriksaan langsung oleh dokter spesialis. "
-                "Saya sedang memeriksa jadwal dokter dan fasilitas IGD/Poli terdekat untuk Anda."
-            )
-        else:
-            return (
-                f"Halo! Saya {self.name}. Keluhan Anda: \"{user_message}\" telah kami terima. "
-                "Bisa diceritakan lebih detail bagian tubuh mana yang dirasakan sakit dan sudah berapa lama?"
-            )
+        # 3. Fallback responder universal (jika API key belum disetel atau offline)
+        return (
+            f"Halo! Saya {self.name}. Pesan Anda: \"{user_message}\" telah berhasil diproses oleh runtime. "
+            f"(Peran agen: {self.description or 'Asisten AI'}. "
+            f"Langkah aktif: {instruction or 'Menanggapi kebutuhan pengguna'}.)"
+        )
 
     async def execute_tool(self, tool_ref: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Eksekusi panggilan tool MCP / API internal"""
@@ -222,7 +268,7 @@ class AgentRuntimeEngine:
                 "antrian_no": "A-14",
                 "estimasi_jam": "10:30 WIB"
             }
-        return {"status": "success", "result": f"Tool '{tool_ref}' dieksekusi dengan baik."}
+        return {"status": "success", "tool": tool_ref, "result": f"Tool '{tool_ref}' dieksekusi dengan parameter: {params}"}
 
     async def run_step(self, session_id: str, user_message: str) -> InvokeResponse:
         # Guardrail check: max turns
@@ -244,7 +290,7 @@ class AgentRuntimeEngine:
             return InvokeResponse(
                 session_id=session_id,
                 agent_id=self.agent_id,
-                response="Batas maksimal percakapan untuk sesi ini telah tercapai demi alasan keamanan (Guardrail max_turns). Silakan hubungi langsung pusat informasi rumah sakit.",
+                response="Batas maksimal percakapan untuk sesi ini telah tercapai demi alasan keamanan (Guardrail max_turns). Silakan mulai sesi percakapan baru.",
                 current_node="blocked",
                 status="blocked",
                 turn_count=session["turn_count"]
@@ -252,7 +298,7 @@ class AgentRuntimeEngine:
 
         # Guardrail check: disallowed behaviors
         disallowed = guardrails.get("disallowed_behaviors", [])
-        system_prompt = self.raw_spec.get("system_prompt", "Kamu adalah asisten triase rumah sakit.")
+        system_prompt = self.system_prompt or "Kamu adalah asisten AI yang profesional dan bertindak sesuai panduan."
         if disallowed:
             system_prompt += f"\nBATASAN KEAMANAN: Jangan melakukan hal-hal berikut: {'; '.join(disallowed)}."
 
@@ -281,9 +327,9 @@ class AgentRuntimeEngine:
             if node.get("output_type") == "classification":
                 branches = node.get("branches", {})
                 lowered_resp = response_text.lower()
-                next_node_id = branches.get("ringan", "beri_saran_mandiri")
+                next_node_id = list(branches.values())[0] if branches else "selesai"
                 for key, target in branches.items():
-                    if key in lowered_resp:
+                    if key.lower() in lowered_resp:
                         next_node_id = target
                         break
                 session["current_node"] = next_node_id
@@ -307,12 +353,12 @@ class AgentRuntimeEngine:
             session["current_node"] = node.get("next", "selesai")
 
             response_text = (
-                f"Sistem telah menjalankan verifikasi jadwal dokter melalui tool {tool_ref}: "
+                f"Sistem telah menjalankan eksekusi tool '{tool_ref}': "
                 f"{json.dumps(tool_res, ensure_ascii=False)}"
             )
 
         elif node_type == "end":
-            response_text = "Sesi konsultasi triase telah selesai. Semoga lekas sembuh!"
+            response_text = f"Sesi interaksi dengan {self.name} telah selesai. Terima kasih!"
             session["current_node"] = "selesai"
         else:
             response_text = f"Memproses langkah {curr_node_id}..."
@@ -349,7 +395,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-engine = AgentRuntimeEngine(CONFIG_PATH)
+# Folder untuk menyimpan file konfigurasi per agent
+AGENTS_DIR = Path(__file__).parent / "deployed_agents"
+AGENTS_DIR.mkdir(exist_ok=True)
+
+# Multi-Agent in-memory registry: slug -> AgentRuntimeEngine
+agents_registry: Dict[str, AgentRuntimeEngine] = {}
+
+# Muat file konfigurasi default awal jika ada
+if CONFIG_PATH.exists():
+    try:
+        default_engine = AgentRuntimeEngine(CONFIG_PATH)
+        agents_registry["default"] = default_engine
+        default_slug = getattr(default_engine, "slug", None) or default_engine.agent_id.lower()
+        agents_registry[default_slug] = default_engine
+    except Exception as e:
+        logger.warning(f"Gagal memuat default agent.yaml: {e}")
+
+# Muat seluruh agent yang pernah dideploy sebelumnya di deployed_agents/
+for yaml_file in AGENTS_DIR.glob("*.yaml"):
+    try:
+        loaded_engine = AgentRuntimeEngine(yaml_file)
+        agent_slug = yaml_file.stem.lower()
+        agents_registry[agent_slug] = loaded_engine
+        logger.info(f"[Multi-Agent Registry] Pre-loaded agent '{loaded_engine.name}' di slug '{agent_slug}'.")
+    except Exception as err:
+        logger.warning(f"Gagal pre-load {yaml_file.name}: {err}")
 
 
 @app.get("/health", tags=["Monitoring"])
@@ -357,50 +428,74 @@ async def health_check():
     """Health check endpoint untuk load balancer / monitoring di AWS"""
     return {
         "status": "healthy",
-        "runtime": "Agent Studio Dedicated Runtime",
-        "agent_id": engine.agent_id,
-        "agent_name": engine.name,
-        "version": engine.version,
-        "agent_status": engine.status,
-        "nodes_loaded": len(engine.nodes_by_id)
+        "engine": "OpenRouter & Multi-Agent Dynamic Runtime",
+        "deployed_agents_count": len(agents_registry),
+        "active_slugs": list(agents_registry.keys()),
+        "port": PORT
     }
 
 
 @app.get("/spec", tags=["Specification"])
 async def get_active_spec():
-    """Mengembalikan spesifikasi aktif yang sedang dijalankan"""
-    return engine.raw_spec
+    """Mengembalikan spesifikasi aktif default yang sedang dijalankan"""
+    default_engine = agents_registry.get("default") or (next(iter(agents_registry.values())) if agents_registry else None)
+    if not default_engine:
+        raise HTTPException(status_code=404, detail="Belum ada agent yang aktif.")
+    return default_engine.raw_spec
 
 
 @app.post("/deploy", tags=["Deployment"])
 async def deploy_agent_config(payload: DeployRequest):
     """
     Menerima deploy konfigurasi agent.yaml baru dari Agent Studio.
-    Dipanggil saat user mengklik tombol 'Publish Agent' di studio.
+    Menyimpan secara persisten per slug dan mendaftarkannya ke registry aktif.
     """
     try:
-        engine.load_config(content=payload.yaml_content)
-        # Tulis ke file config lokal agar persisten saat restart
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            f.write(payload.yaml_content)
+        data = yaml.safe_load(payload.yaml_content) or {}
+        metadata = data.get("metadata", {})
+        slug = (
+            getattr(payload, "slug", None)
+            or metadata.get("slug")
+            or data.get("slug")
+            or metadata.get("id")
+            or data.get("agent_id")
+            or "default"
+        )
+        clean_slug = str(slug).strip().lower().replace(" ", "-")
+
+        # Simpan persisten ke deployed_agents/{slug}.yaml
+        agent_file = AGENTS_DIR / f"{clean_slug}.yaml"
+        agent_file.write_text(payload.yaml_content, encoding="utf-8")
+
+        # Buat instance engine baru khusus untuk agent ini
+        new_engine = AgentRuntimeEngine(agent_file)
+        agents_registry[clean_slug] = new_engine
+        agents_registry["default"] = new_engine
+
+        logger.info(f"[Multi-Agent Deploy] Berhasil mendaftarkan agent '{new_engine.name}' pada slug '{clean_slug}'.")
 
         return {
             "status": "deployed",
-            "message": f"Agent '{engine.name}' (v{engine.version}) berhasil dideploy ke server runtime.",
-            "agent_id": engine.agent_id,
-            "endpoint": f"http://{HOST}:{PORT}/invoke"
+            "message": f"Agent '{new_engine.name}' (v{new_engine.version}) berhasil dideploy pada endpoint /agents/{clean_slug}/invoke.",
+            "agent_id": new_engine.agent_id,
+            "agent_slug": clean_slug,
+            "endpoint": f"http://{HOST}:{PORT}/agents/{clean_slug}/invoke"
         }
     except Exception as e:
+        logger.error(f"Gagal deploy agent: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Gagal mem-parsing file agent.yaml: {str(e)}")
 
 
 @app.post("/invoke", response_model=InvokeResponse, tags=["Invocation"])
 async def invoke_agent(payload: InvokeRequest):
     """
-    Endpoint utama bagi pengguna / chatbot rumah sakit eksternal untuk berbicara dengan agent (default).
+    Endpoint pemanggilan agent default yang sedang aktif.
     """
+    default_engine = agents_registry.get("default") or (next(iter(agents_registry.values())) if agents_registry else None)
+    if not default_engine:
+        raise HTTPException(status_code=404, detail="Belum ada agent yang dideploy di runtime ini.")
     try:
-        return await engine.run_step(payload.session_id, payload.message)
+        return await default_engine.run_step(payload.session_id, payload.message)
     except Exception as e:
         logger.error(f"Error saat mengeksekusi invoke: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Runtime error: {str(e)}")
@@ -409,11 +504,26 @@ async def invoke_agent(payload: InvokeRequest):
 @app.post("/agents/{agent_slug}/invoke", response_model=InvokeResponse, tags=["Multi-Agent Invocation"])
 async def invoke_agent_by_slug(agent_slug: str, payload: InvokeRequest):
     """
-    Multi-Agent Endpoint: Memanggil agent spesifik berdasarkan slug/identitas uniknya.
+    Multi-Agent Endpoint: Memanggil agent spesifik berdasarkan slug uniknya.
+    Jika slug belum dideploy, mengembalikan HTTP 404 (tidak merespons secara sembarangan).
     """
+    clean_slug = agent_slug.strip().lower()
+    target_engine = agents_registry.get(clean_slug)
+
+    if not target_engine:
+        active_list = [s for s in agents_registry.keys() if s != "default"]
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Agent dengan slug '{agent_slug}' tidak ditemukan atau belum dideploy di server runtime ini. "
+                f"Slug yang tersedia saat ini: {active_list}"
+            )
+        )
+
     try:
-        logger.info(f"[Multi-Agent Runtime] Menerima request untuk agent slug: '{agent_slug}'")
-        return await engine.run_step(payload.session_id, payload.message)
+        logger.info(f"[Multi-Agent Runtime] Mengeksekusi permintaan untuk agent '{target_engine.name}' (slug: {clean_slug})")
+        resp = await target_engine.run_step(payload.session_id, payload.message)
+        return resp
     except Exception as e:
         logger.error(f"Error saat mengeksekusi invoke [{agent_slug}]: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Runtime error: {str(e)}")
@@ -422,14 +532,19 @@ async def invoke_agent_by_slug(agent_slug: str, payload: InvokeRequest):
 @app.get("/agents/{agent_slug}/health", tags=["Monitoring"])
 async def health_check_by_slug(agent_slug: str):
     """Health check spesifik untuk agent berdasarkan slug"""
+    clean_slug = agent_slug.strip().lower()
+    target_engine = agents_registry.get(clean_slug)
+    if not target_engine:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_slug}' tidak ditemukan.")
+
     return {
         "status": "healthy",
-        "slug": agent_slug,
+        "slug": clean_slug,
         "runtime": "Agent Studio Dedicated Runtime",
-        "agent_id": engine.agent_id,
-        "agent_name": engine.name,
-        "version": engine.version,
-        "nodes_loaded": len(engine.nodes_by_id)
+        "agent_id": target_engine.agent_id,
+        "agent_name": target_engine.name,
+        "version": target_engine.version,
+        "nodes_loaded": len(target_engine.nodes_by_id)
     }
 
 

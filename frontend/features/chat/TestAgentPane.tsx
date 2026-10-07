@@ -162,38 +162,64 @@ export function TestAgentPane({
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+  // Helper untuk memformat multiline text ke indentasi YAML yang valid
+  const formatYamlBlock = (text: string, indentSpaces: number = 2): string => {
+    const pad = " ".repeat(indentSpaces);
+    const cleaned = (text || "").replace(/\r\n/g, "\n").trim();
+    if (!cleaned) return `${pad}""`;
+    return cleaned
+      .split("\n")
+      .map((line) => `${pad}${line}`)
+      .join("\n");
+  };
+
   // Helper untuk generate YAML dari activeAgent di chat
   const generateYamlFromAgent = (agent: AgentSpecData): string => {
     const agentId = agent.id || `agent-${Date.now()}`;
-    const instructions = agent.instructions || "Kamu adalah asisten AI yang ramah dan membantu.";
-    return `# Konfigurasi otomatis dari sesi chat Agent Studio
-agent_id: "${agentId}"
-name: "${agent.name || 'AI Assistant'}"
-description: >
-  ${agent.description || 'Agent dibuat melalui sesi chat Agent Studio'}
-version: 1
-status: "active"
+    const agentName = agent.name || "AI Assistant";
+    const slugName = agentName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "custom-agent";
+    const rawDesc = agent.description || "Agent dibuat melalui sesi chat Agent Studio";
+    const rawInstructions = agent.instructions || "Kamu adalah asisten AI yang ramah, profesional, dan membantu.";
+    const toolsList = agent.tools && agent.tools.length > 0
+      ? agent.tools.map((t) => `  - "${t}"`).join("\n")
+      : " []";
 
-model:
-  provider: "openai"
-  name: "${agent.model || 'gpt-4o-mini'}"
-  temperature: 0.3
-  max_tokens: 1024
+    const formattedDesc = formatYamlBlock(rawDesc, 4);
+    const formattedInstructions = formatYamlBlock(rawInstructions, 2);
 
-system_prompt: >
-  ${instructions}
+    return `spec_version: v1.0
+metadata:
+  id: "${agentId}"
+  name: "${agentName}"
+  slug: "${slugName}"
+  description: >
+${formattedDesc}
+  version: 1
+  status: "active"
+
+configuration:
+  model: "${agent.model || 'gpt-4o-mini'}"
+  harness: "default-safe-v1"
+
+tools:${toolsList.startsWith(" []") ? " []" : "\n" + toolsList}
+
+instructions: |
+${formattedInstructions}
 
 flow:
   entry_node: "main_step"
   nodes:
     - id: "main_step"
       type: "llm_step"
-      instruction: "${instructions}"
+      instruction: "Tanggapi pesan pengguna dengan jelas, solutif, dan ramah sesuai dengan instruksi peran agen."
       next: "selesai"
     - id: "selesai"
       type: "end"
 
 tools_required: ${JSON.stringify(agent.tools || [])}
+guardrails:
+  max_turns: 15
+  disallowed_behaviors: []
 `;
   };
 

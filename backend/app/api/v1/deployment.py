@@ -225,11 +225,28 @@ async def publish_agent(payload: PublishRequest):
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=f"Validasi Graph Gagal: {str(ve)}")
 
-    # 3. Set endpoint target ke server runtime AWS dengan slug unik
+    # 3. Sinkronkan YAML ke server runtime AWS dengan slug unik
     spec_slug = spec.get("slug", "")
     clean_slug = payload.slug.strip().lower() or spec_slug or "agent"
     target_endpoint = f"{AWS_RUNTIME_URL}/agents/{clean_slug}/invoke"
-    runtime_sync_msg = f"Target endpoint unik disiapkan di {target_endpoint}."
+    runtime_sync_msg = f"Endpoint disiapkan di {target_endpoint}."
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{AWS_RUNTIME_URL}/deploy",
+                json={
+                    "slug": clean_slug,
+                    "yaml_content": yaml_text,
+                    "target_environment": "production"
+                }
+            )
+            if resp.status_code == 200:
+                runtime_sync_msg = f"Berhasil disinkronkan langsung ke AWS EC2 Runtime ({target_endpoint})."
+            else:
+                runtime_sync_msg = f"Runtime merespon: {resp.text}"
+    except Exception as err:
+        runtime_sync_msg = f"Koneksi runtime sync: {str(err)}."
 
     # 4. Generate API Key unik untuk client
     generated_key = f"agy_live_{secrets.token_hex(12)}"
