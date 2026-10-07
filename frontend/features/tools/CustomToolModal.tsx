@@ -126,7 +126,9 @@ export function CustomToolModal({
       health: "ok",
       usedBy: "0 agent",
       enabled: true,
-      config: { functionName: selectedBackendFn },
+      config: {
+        functionName: selectedBackendFn,
+      },
       parameters: parameters,
     };
 
@@ -373,10 +375,9 @@ export function CustomToolModal({
           <button
             type="submit"
             form="custom-tool-form"
-            disabled={isSaving}
             className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-colors shadow-2xs"
           >
-            {isSaving ? "Saving..." : "Save Tool to Catalog"}
+            Save Tool to Catalog
           </button>
         </div>
       </div>
