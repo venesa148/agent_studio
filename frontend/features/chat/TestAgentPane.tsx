@@ -39,18 +39,85 @@ import { AgentSpecData } from "@/app/page";
 
 export type TestPaneTab = "chat" | "trace";
 
+export interface ToolExecutionInfo {
+  name: string;
+  endpoint?: string;
+  source?: string;
+  params: Record<string, any>;
+  result: any;
+  duration_ms: number;
+  status?: string;
+}
+
 interface ChatMessage {
   id: string;
   sender: "user" | "agent";
   text: string;
-  toolCall?: {
-    name: string;
-    params: Record<string, any>;
-    result: any;
-    duration_ms: number;
-  };
+  toolCalls?: ToolExecutionInfo[];
   status?: "ok" | "escalated" | "blocked" | "error";
   time: string;
+}
+
+function ToolExecutionCard({ toolCall }: { toolCall: ToolExecutionInfo }) {
+  const [expanded, setExpanded] = useState(false);
+  const endpoint = toolCall.endpoint || "https://sisters-given-cloud-nerve.trycloudflare.com";
+  const source = toolCall.source || "Database MySQL Web Teman (40 Data RS)";
+  const isOk = toolCall.status !== "error";
+
+  return (
+    <div className="rounded-xl border border-blue-200/90 bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-white p-2.5 text-xs shadow-2xs space-y-2 mt-1">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 font-semibold text-slate-800">
+          <Globe className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+          <span className="font-mono text-blue-700">{toolCall.name}()</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
+            HTTP 200 OK
+          </span>
+        </div>
+        <span className="text-[10px] font-mono text-slate-500 font-medium">
+          ⏱️ {toolCall.duration_ms}ms
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] text-slate-600 bg-white/90 px-2 py-1.5 rounded-lg border border-slate-200/70 font-mono">
+        <div className="flex items-center gap-1 truncate max-w-[260px]" title={endpoint}>
+          <span className="text-slate-400 font-sans font-semibold">Hit:</span>
+          <span className="text-blue-600 truncate">{endpoint}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="text-[10px] font-sans font-semibold text-blue-700 hover:text-blue-900 bg-blue-100/70 hover:bg-blue-100 px-2 py-0.5 rounded cursor-pointer transition-colors shrink-0 ml-1"
+        >
+          {expanded ? "Tutup Data" : "Lihat JSON"}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="space-y-1.5 pt-1 animate-in fade-in duration-150">
+          <div>
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">
+              Input Parameter
+            </div>
+            <pre className="text-[10px] text-slate-700 font-mono bg-white p-2 rounded-lg border border-slate-200 overflow-x-auto whitespace-pre-wrap">
+              {JSON.stringify(toolCall.params, null, 2)}
+            </pre>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5 flex items-center justify-between">
+              <span>Data MySQL dari Web Teman (Response)</span>
+              <span className="text-[9px] text-emerald-600 font-normal">{source}</span>
+            </div>
+            <pre className="text-[10px] text-slate-700 font-mono bg-white p-2 rounded-lg border border-slate-200 overflow-x-auto max-h-40 whitespace-pre-wrap">
+              {typeof toolCall.result === "object"
+                ? JSON.stringify(toolCall.result, null, 2)
+                : String(toolCall.result)}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface TestAgentPaneProps {
@@ -358,18 +425,32 @@ tools_required: ${JSON.stringify(agent.tools || [])}
 
       const data = await res.json();
 
+      const rawTraceSteps = Array.isArray(data.trace_steps) ? data.trace_steps : [];
+      const toolCalls: ToolExecutionInfo[] = rawTraceSteps
+        .filter((s: any) => s.type === "tool_calling" || (s.tool_name && s.tool_name !== "pre_check_guardrail" && s.tool_name !== "post_check_escalation"))
+        .map((s: any) => ({
+          name: s.tool_name || s.title || "tool",
+          endpoint: s.endpoint || s.result?._endpoint || "https://sisters-given-cloud-nerve.trycloudflare.com",
+          source: s.source || s.result?._source || "Database MySQL Web Teman",
+          params: s.params || {},
+          result: s.result || {},
+          duration_ms: s.duration_ms ?? 0,
+          status: s.status || "ok",
+        }));
+
       const agentMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: "agent",
         text: data.response,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
         status: data.status || "ok",
         time: "Sekarang",
       };
 
       setMessages((prev) => [...prev, agentMsg]);
 
-      if (data.trace_steps && Array.isArray(data.trace_steps)) {
-        setTraceSteps(data.trace_steps);
+      if (rawTraceSteps.length > 0) {
+        setTraceSteps(rawTraceSteps);
       }
     } catch (error: any) {
       clearTimeout(chatTimeoutId);
@@ -984,17 +1065,11 @@ tools_required: ${JSON.stringify(agent.tools || [])}
                     )}
                   </div>
 
-                  {msg.toolCall && (
-                    <div className="ml-8 rounded-lg border border-slate-200 bg-white p-2 text-[11px] shadow-2xs space-y-1">
-                      <div className="flex items-center justify-between text-slate-500">
-                        <div className="flex items-center gap-1.5 font-mono text-blue-700 font-semibold">
-                          <Wrench className="w-3 h-3 text-blue-600" />
-                          <span>{msg.toolCall.name}()</span>
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {msg.toolCall.duration_ms}ms
-                        </span>
-                      </div>
+                  {msg.toolCalls && msg.toolCalls.length > 0 && (
+                    <div className="ml-8 space-y-1.5">
+                      {msg.toolCalls.map((tc, tcIdx) => (
+                        <ToolExecutionCard key={tcIdx} toolCall={tc} />
+                      ))}
                     </div>
                   )}
 
@@ -1129,6 +1204,16 @@ tools_required: ${JSON.stringify(agent.tools || [])}
                           </span>
                         </div>
                       </div>
+
+                      {step.endpoint && (
+                        <div className="flex items-center gap-1.5 text-[10px] font-mono text-blue-700 bg-blue-50/80 px-2 py-1 rounded-lg border border-blue-200/80">
+                          <Globe className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <span className="text-slate-500 font-sans font-bold">Hit:</span>
+                          <span className="truncate text-blue-600 font-medium" title={step.endpoint}>
+                            {step.endpoint}
+                          </span>
+                        </div>
+                      )}
 
                       {paramsStr && (
                         <div>

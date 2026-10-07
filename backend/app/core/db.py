@@ -8,7 +8,12 @@ class Base(DeclarativeBase):
 
 # Ensure database URL is compatible with async drivers
 db_url = settings.DATABASE_URL
-engine_kwargs = {"echo": settings.DEBUG, "future": True}
+engine_kwargs = {
+    "echo": settings.DEBUG,
+    "future": True,
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+}
 
 if db_url.startswith("postgresql://"):
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)

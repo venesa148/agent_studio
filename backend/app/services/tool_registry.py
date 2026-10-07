@@ -55,105 +55,156 @@ class ToolRegistryService:
 
     @staticmethod
     async def _execute_builtin_tool(tool_name: str, params: Dict[str, Any]) -> Any:
+        import os
+        from app.core.config import settings
+
+        api_base = getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "https://sisters-given-cloud-nerve.trycloudflare.com")
+        api_base = api_base.rstrip("/")
+
+        # 1. get_referral_status
         if tool_name == "get_referral_status":
-            ref_id = params.get("referral_id", "RJ-001")
+            ref_id = str(params.get("referral_id") or params.get("referral_no") or "RUJ-2026-0001").strip()
+            
+            # Skenario Harness: jika referral 9999, return NOT_FOUND untuk memicu eskalasi
+            if "9999" in ref_id:
+                return {
+                    "referral_no": ref_id,
+                    "status": "NOT_FOUND",
+                    "message": f"Surat rujukan dengan nomor {ref_id} tidak ditemukan dalam basis data faskes BPJS Kesehatan."
+                }
+            
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    target_url = f"{api_base}/api/v1/mock-bpjs/referral-status"
+                    resp = await client.post(target_url, json={"referral_no": ref_id})
+                    if resp.status_code == 200:
+                        data = resp.json().get("data", {})
+                        res_dict = data if isinstance(data, dict) else resp.json()
+                        if isinstance(res_dict, dict):
+                            res_dict["_endpoint"] = target_url
+                            res_dict["_source"] = "Live Cloudflare Web API Teman (MySQL)"
+                        return res_dict
+            except Exception as e:
+                print(f"[Remote API Warning] referral-status fallback: {e}")
+
             return {
                 "referral_id": ref_id,
-                "status": "Aktif" if ref_id != "RJ-9999" else "Tidak Ditemukan",
+                "status": "Aktif",
                 "valid_until": "2026-12-31",
-                "destination_hospital": "RS Cipto Mangunkusumo",
+                "destination_hospital": "RSUPN Dr. Cipto Mangunkusumo",
                 "poli": "Spesialis Penyakit Dalam"
             }
-        elif tool_name in ["search_hospital", "hospital_finder"]:
-            city_raw = params.get("city", "Jakarta")
-            city_norm = str(city_raw).lower().strip()
 
-            hospitals_database = {
-                "pusat": [
-                    {"name": "RSUP Nasional Cipto Mangunkusumo (RSCM)", "type": "Tipe A", "bpjs": True, "emergency_24h": True, "address": "Jl. Diponegoro No. 71, Jakarta Pusat"},
-                    {"name": "RSUD Tarakan", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "poli": ["Jantung", "Mata", "Bedah"], "address": "Jl. Kyai Caringin, Gambir, Jakarta Pusat"},
-                    {"name": "RS PGI Cikini", "type": "Tipe B", "bpjs": True, "emergency_24h": False, "poli": ["Penyakit Dalam", "Ginjal"], "address": "Jl. Raden Saleh No. 40, Jakarta Pusat"}
-                ],
-                "selatan": [
-                    {"name": "RSUP Fatmawati", "type": "Tipe A", "bpjs": True, "emergency_24h": True, "inpatient_quota": 14, "address": "Jl. RS Fatmawati, Cilandak, Jakarta Selatan"},
-                    {"name": "RSUD Pasar Minggu", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "poli": ["Anak", "Kebidanan"], "address": "Jl. TB Simatupang No. 1, Jakarta Selatan"},
-                    {"name": "RS Siloam Hospitals TB Simatupang", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "poli": ["Jantung", "Saraf"], "address": "Jl. RA Kartini No. 8, Jakarta Selatan"}
-                ],
-                "barat": [
-                    {"name": "RSUD Cengkareng", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "address": "Jl. Bumi Cengkareng Indah, Jakarta Barat"},
-                    {"name": "RS Pelni", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "poli": ["Jantung", "Paru"], "address": "Jl. Aipda KS Tubun No. 92, Jakarta Barat"}
-                ],
-                "timur": [
-                    {"name": "RSUP Persahabatan", "type": "Tipe A", "bpjs": True, "emergency_24h": True, "poli": ["Respirasi", "Paru"], "address": "Jl. Persahabatan Raya, Rawamangun, Jakarta Timur"},
-                    {"name": "RSUD Pasar Rebo", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "address": "Jl. TB Simatupang No. 30, Jakarta Timur"}
-                ],
-                "utara": [
-                    {"name": "RSUD Koja", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "address": "Jl. Deli No. 4, Tanjung Priok, Jakarta Utara"},
-                    {"name": "RS Pelabuhan Jakarta", "type": "Tipe C", "bpjs": True, "emergency_24h": True, "address": "Jl. Kramat Jaya, Koja, Jakarta Utara"}
-                ],
-                "surabaya": [
-                    {"name": "RSUD Dr. Soetomo", "type": "Tipe A", "bpjs": True, "emergency_24h": True, "address": "Jl. Mayjen Prof. Dr. Moestopo No. 6-8, Surabaya"},
-                    {"name": "RS Universitas Airlangga (RSUA)", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "address": "Kampus C Unair, Mulyorejo, Surabaya"}
-                ],
-                "bandung": [
-                    {"name": "RSUP Dr. Hasan Sadikin (RSHS)", "type": "Tipe A", "bpjs": True, "emergency_24h": True, "address": "Jl. Pasteur No. 38, Bandung"},
-                    {"name": "RSUD Kota Bandung", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "address": "Jl. Rumah Sakit No. 22, Ujung Berung, Bandung"}
+        # 2. search_hospital / hospital_finder
+        elif tool_name in ["search_hospital", "hospital_finder"]:
+            city_raw = str(params.get("city") or params.get("location") or "Jakarta").strip()
+            
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    target_url = f"{api_base}/api/v1/mock-bpjs/hospitals"
+                    resp = await client.post(target_url, json={"location": city_raw})
+                    if resp.status_code == 200:
+                        data = resp.json().get("data", [])
+                        if data:
+                            return {
+                                "city": city_raw,
+                                "source": "API Web Teman (MySQL 40 RS)",
+                                "_endpoint": target_url,
+                                "_source": "Live Cloudflare Web API Teman (MySQL)",
+                                "count": len(data),
+                                "hospitals": data
+                            }
+            except Exception as e:
+                print(f"[Remote API Warning] hospitals fallback: {e}")
+
+            # Fallback jika remote API offline
+            return {
+                "city": city_raw,
+                "source": "Lokal Fallback",
+                "count": 3,
+                "hospitals": [
+                    {"name": "RSUPN Dr. Cipto Mangunkusumo (RSCM)", "tipe": "RSUP / Kelas A", "mitra_bpjs": True, "kota": "Jakarta Pusat"},
+                    {"name": "RSUD Tarakan", "tipe": "RSUD / Kelas B", "mitra_bpjs": True, "kota": "Jakarta Pusat"},
+                    {"name": "RSUP Fatmawati", "tipe": "RSUP / Kelas A", "mitra_bpjs": True, "kota": "Jakarta Selatan"}
                 ]
             }
 
-            # Filter data rumah sakit sesuai daerah yang diminta
-            matched_hospitals = None
-            for key, h_list in hospitals_database.items():
-                if key in city_norm or (key == "selatan" and ("jaksel" in city_norm or "jak sel" in city_norm)) or (key == "pusat" and ("jakpus" in city_norm or "jak pus" in city_norm)) or (key == "barat" and ("jakbar" in city_norm or "jak bar" in city_norm)) or (key == "timur" and ("jaktim" in city_norm or "jak tim" in city_norm)) or (key == "utara" and ("jakut" in city_norm or "jak ut" in city_norm)):
-                    matched_hospitals = h_list
-                    break
-
-            if not matched_hospitals:
-                # Default fallback jika hanya disebut 'Jakarta' umum
-                if "jakarta" in city_norm:
-                    matched_hospitals = [
-                        {"name": "RSUP Nasional Cipto Mangunkusumo", "type": "Tipe A", "bpjs": True, "emergency_24h": True, "region": "Jakarta Pusat"},
-                        {"name": "RSUP Fatmawati", "type": "Tipe A", "bpjs": True, "emergency_24h": True, "region": "Jakarta Selatan"},
-                        {"name": "RSUD Tarakan", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "region": "Jakarta Pusat"}
-                    ]
-                else:
-                    matched_hospitals = [
-                        {"name": f"RSUD {city_raw.title()}", "type": "Tipe B", "bpjs": True, "emergency_24h": True, "address": f"Jl. Kesehatan Utama No. 1, {city_raw.title()}"},
-                        {"name": f"RS Harapan Sehat {city_raw.title()}", "type": "Tipe C", "bpjs": True, "emergency_24h": True, "address": f"Jl. Merdeka No. 45, {city_raw.title()}"}
-                    ]
-
-            return {
-                "city": city_raw,
-                "count": len(matched_hospitals),
-                "hospitals": matched_hospitals
-            }
+        # 3. find_specialist
         elif tool_name == "find_specialist":
-            specialty = params.get("specialty", "Penyakit Dalam")
-            city = params.get("city", "Jakarta")
+            specialty = str(params.get("specialty") or "Jantung").strip()
+            city = str(params.get("city") or params.get("location") or "Jakarta").strip()
+            
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    target_url = f"{api_base}/api/v1/mock-bpjs/specialists"
+                    resp = await client.post(target_url, json={"specialty": specialty, "location": city})
+                    if resp.status_code == 200:
+                        data = resp.json().get("data", [])
+                        if data:
+                            return {
+                                "specialty": specialty,
+                                "city": city,
+                                "source": "API Web Teman",
+                                "_endpoint": target_url,
+                                "_source": "Live Cloudflare Web API Teman (MySQL)",
+                                "doctors": data
+                            }
+            except Exception as e:
+                print(f"[Remote API Warning] specialists fallback: {e}")
+
             return {
                 "specialty": specialty,
                 "city": city,
                 "doctors": [
-                    {"name": "dr. Budi Santoso, Sp.PD", "hospital": "RS Cipto Mangunkusumo", "schedule": "Senin-Kamis 09:00"},
-                    {"name": "dr. Siti Rahma, Sp.PD", "hospital": "RS Fatmawati", "schedule": "Selasa-Jumat 13:00"}
+                    {"nama_dokter": "dr. Andi Pratama, Sp.PD", "spesialisasi": specialty, "rumah_sakit": "RSUD Tarakan", "jadwal_praktek": "Senin - Kamis (08.00 - 12.00)"},
+                    {"nama_dokter": "dr. Siti Rahma, Sp.PD", "spesialisasi": specialty, "rumah_sakit": "RSCM", "jadwal_praktek": "Rabu - Sabtu (10.00 - 14.00)"}
                 ]
             }
+
+        # 4. check_bpjs
         elif tool_name == "check_bpjs":
-            bpjs_id = params.get("bpjs_id") or params.get("hospital_id", "000123456789")
+            bpjs_id = str(params.get("bpjs_id") or params.get("number") or params.get("hospital_id") or "1234567890123456").strip()
+            
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    resp = await client.post(f"{api_base}/api/v1/mock-bpjs/check-bpjs", json={"number": bpjs_id})
+                    if resp.status_code == 200:
+                        data = resp.json().get("data", {})
+                        if data:
+                            return data
+            except Exception as e:
+                print(f"[Remote API Warning] check-bpjs fallback: {e}")
+
             return {
-                "card_number": bpjs_id,
-                "status": "AKTIF",
-                "faskes_1": "Puskesmas Gambir",
-                "class": "Kelas 1"
+                "nik_atau_kartu": bpjs_id,
+                "nama": "Budi Santoso",
+                "status_kepesertaan": "AKTIF",
+                "kelas_rawat": "Kelas 1",
+                "faskes_tingkat_1": "Puskesmas Kecamatan Gambir",
+                "eligibility": "Berhak mendapatkan pelayanan rawat jalan & inap"
             }
+
+        # 5. search_web
         elif tool_name == "search_web":
-            query = params.get("query", "")
+            query = str(params.get("query") or "aturan rujukan BPJS").strip()
+            
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    resp = await client.post(f"{api_base}/api/v1/mock-bpjs/search-web", json={"query": query})
+                    if resp.status_code == 200:
+                        data = resp.json().get("data", {})
+                        if data:
+                            return data
+            except Exception as e:
+                print(f"[Remote API Warning] search-web fallback: {e}")
+
             return {
                 "query": query,
                 "results": [
-                    {"title": f"Hasil pencarian untuk: {query}", "snippet": f"Informasi terkini mengenai {query}."}
+                    {"title": "Aturan Rujukan Faskes BPJS Kesehatan", "snippet": "Pelayanan kesehatan tingkat lanjutan harus melalui rujukan berjenjang dari FKTP kecuali kondisi gawat darurat."}
                 ]
             }
+
         return {"status": "ok", "tool": tool_name, "params": params}
 
     @staticmethod

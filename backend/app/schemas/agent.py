@@ -7,11 +7,15 @@ class AgentSpec(BaseModel):
     name: str
     description: Optional[str] = ""
     instructions: Optional[str] = ""
-    model: str = "gpt-4o-mini"
+    model: str = "z-ai/glm-5.3"
     tools: List[str] = []
     mcp_servers: List[str] = []
     harness: str = "default-safe-v1"
     status: str = "active"
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 class AgentSpecCreate(BaseModel):
     name: str
@@ -60,7 +64,8 @@ class BuilderChatRequest(BaseModel):
 class BuilderChatResponse(BaseModel):
     id: Optional[str] = None
     message: str
-    spec: Optional[AgentSpecResponse] = None
+    spec: Optional[AgentSpec] = None
+    is_draft: bool = False
 
 class AgentTestRequest(BaseModel):
     agent_id: str

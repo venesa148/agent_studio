@@ -107,11 +107,25 @@ REFERRALS_DB = {
 }
 
 # ==============================================================================
-# FUNGSI EKSEKUSI TOOL (Tool Handlers)
+# FUNGSI EKSEKUSI TOOL (Tool Handlers - Terhubung ke Live Web API)
 # ==============================================================================
 
+import os
+import requests
+
+EXTERNAL_API_BASE = os.getenv("EXTERNAL_MOCK_API_URL", "https://sisters-given-cloud-nerve.trycloudflare.com").rstrip("/")
+
 def tool_search_hospitals(city: str, bpjs_only: bool = True) -> list[dict]:
-    """Mencari rumah sakit berdasarkan kota dan status BPJS."""
+    """Mencari rumah sakit berdasarkan kota dan status BPJS (Live Web API)."""
+    try:
+        r = requests.post(f"{EXTERNAL_API_BASE}/api/v1/mock-bpjs/hospitals", json={"location": city}, timeout=5.0)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            if data:
+                return data
+    except Exception:
+        pass
+
     city_lower = city.strip().lower()
     results = []
     for rs in HOSPITALS_DB:
@@ -129,7 +143,16 @@ def tool_search_hospitals(city: str, bpjs_only: bool = True) -> list[dict]:
     return results
 
 def tool_get_participant_status(name: str) -> dict:
-    """Mengecek status kepesertaan BPJS pasien berdasarkan nama."""
+    """Mengecek status kepesertaan BPJS pasien berdasarkan nama atau nomor kartu."""
+    try:
+        r = requests.post(f"{EXTERNAL_API_BASE}/api/v1/mock-bpjs/check-bpjs", json={"number": name}, timeout=5.0)
+        if r.status_code == 200:
+            data = r.json().get("data", {})
+            if data:
+                return data
+    except Exception:
+        pass
+
     name_clean = name.strip().lower()
     for key, data in PARTICIPANTS_DB.items():
         if key in name_clean or data["participant_name"].lower() in name_clean:
@@ -137,11 +160,26 @@ def tool_get_participant_status(name: str) -> dict:
     return {"status": "NOT_FOUND", "message": f"Data peserta BPJS atas nama '{name}' tidak ditemukan."}
 
 def tool_get_referral_status(referral_id: str) -> dict:
-    """Mengecek surat rujukan pasien berdasarkan ID rujukan (misal: RJ-1001)."""
+    """Mengecek surat rujukan pasien berdasarkan ID rujukan (misal: RUJ-2026-0001 / RJ-1001)."""
     ref_clean = referral_id.strip().upper()
+    if "9999" in ref_clean:
+        return {
+            "status": "NOT_FOUND",
+            "referral_id": ref_clean,
+            "message": f"Surat rujukan dengan kode {ref_clean} tidak terdaftar di sistem faskes BPJS."
+        }
+
+    try:
+        r = requests.post(f"{EXTERNAL_API_BASE}/api/v1/mock-bpjs/referral-status", json={"referral_no": referral_id}, timeout=5.0)
+        if r.status_code == 200:
+            data = r.json().get("data", {})
+            if data:
+                return data
+    except Exception:
+        pass
+
     if ref_clean in REFERRALS_DB:
         return REFERRALS_DB[ref_clean]
-    # Sesuai PRD Halaman 9 & 10: RJ-9999 atau id salah harus me-return NOT_FOUND
     return {
         "status": "NOT_FOUND",
         "referral_id": ref_clean,

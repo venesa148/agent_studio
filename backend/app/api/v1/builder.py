@@ -71,6 +71,10 @@ async def builder_save(payload: AgentSpec, db: AsyncSession = Depends(get_db)):
             )
             db_agent = await AgentService.create_agent(db, create_payload)
 
+        try:
+            await AgentService.export_agent_yaml(db, db_agent.id, save_to_disk=True)
+        except Exception as e_yaml:
+            print(f'Warning auto-export yaml: {e_yaml}')
         return AgentSpecResponse.model_validate(db_agent)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Gagal menyimpan Agent: {str(e)}")

@@ -25,6 +25,7 @@ interface Message {
   sender: "user" | "builder";
   text: string;
   spec?: AgentSpecData;
+  is_draft?: boolean;
   time?: string;
 }
 
@@ -43,13 +44,45 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [dbTools, setDbTools] = useState<any[]>([]);
 
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const skipClearRef = React.useRef(false);
   const currentAgentIdRef = React.useRef<string | undefined>(undefined);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const getStorageKey = (agentId?: string) => `builder_chat_history_${agentId || "global"}`;
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isBuilding]);
+
+  // Simpan riwayat chat builder ke localStorage setiap kali ada perubahan
+  useEffect(() => {
+    if (typeof window !== "undefined" && messages.length > 0) {
+      try {
+        localStorage.setItem(getStorageKey(currentAgentIdRef.current), JSON.stringify(messages));
+      } catch (e) {
+        console.warn("Gagal menyimpan riwayat chat builder ke localStorage:", e);
+      }
+    }
+  }, [messages]);
 
   useEffect(() => {
     if (!activeAgent) {
       if (currentAgentIdRef.current !== undefined) {
-        setMessages([]);
+        // Coba pulihkan riwayat chat sesi global/tanpa agen jika ada
+        const saved = typeof window !== "undefined" ? localStorage.getItem(getStorageKey()) : null;
+        if (saved) {
+          try {
+            setMessages(JSON.parse(saved));
+          } catch {
+            setMessages([]);
+          }
+        } else {
+          setMessages([]);
+        }
         setInput("");
         setErrorMessage(null);
         setSaveSuccessMsg(null);
@@ -60,15 +93,45 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
 
     if (currentAgentIdRef.current !== activeAgent.id) {
       if (!skipClearRef.current) {
-        setMessages([
-          {
-            id: `system-spec-${activeAgent.id}`,
-            sender: "builder",
-            text: `Berikut adalah konfigurasi aktif untuk Agent '${activeAgent.name}'. Anda dapat langsung mengubahnya melalui form di bawah ini, atau memberi instruksi perubahan melalui chat.`,
-            spec: activeAgent,
-            time: "Sistem",
+        // Pulihkan riwayat percakapan sebelumnya dari localStorage untuk agen ini
+        const saved = typeof window !== "undefined" ? localStorage.getItem(getStorageKey(activeAgent.id)) : null;
+        let loadedMessages: Message[] = [];
+        if (saved) {
+          try {
+            loadedMessages = JSON.parse(saved);
+          } catch (e) {
+            console.warn("Gagal mem-parsing cached messages:", e);
           }
-        ]);
+        }
+
+        if (loadedMessages.length > 0) {
+          // Sinkronkan spec pesan terakhir dengan data activeAgent terbaru dari DB
+          const updated = loadedMessages.map((m, idx) => {
+            if (idx === loadedMessages.length - 1 && m.spec) {
+              return { ...m, spec: { ...m.spec, ...activeAgent } };
+            }
+            return m;
+          });
+          setMessages(updated);
+        } else {
+          // Jika belum ada riwayat chat, mulai dengan konfigurasi aktif
+          const initialMsgs: Message[] = [
+            {
+              id: `system-spec-${activeAgent.id}`,
+              sender: "builder",
+              text: `Berikut adalah konfigurasi aktif untuk Agent '${activeAgent.name}'. Anda dapat langsung mengubahnya melalui form di bawah ini, atau memberi instruksi perubahan melalui chat.`,
+              spec: activeAgent,
+              is_draft: false,
+              time: "Sistem",
+            }
+          ];
+          setMessages(initialMsgs);
+          if (typeof window !== "undefined") {
+            try {
+              localStorage.setItem(getStorageKey(activeAgent.id), JSON.stringify(initialMsgs));
+            } catch {}
+          }
+        }
         setInput("");
         setErrorMessage(null);
         setSaveSuccessMsg(null);
@@ -102,9 +165,10 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-  const handleSend = async (e?: React.FormEvent) => {
+  const handleSend = async (customPrompt?: string, e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!input.trim() || isBuilding) return;
+    const promptToSend = typeof customPrompt === "string" ? customPrompt : input;
+    if (!promptToSend.trim() || isBuilding) return;
 
     setErrorMessage(null);
     setSaveSuccessMsg(null);
@@ -112,12 +176,11 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
     const userMsg: Message = {
       id: Date.now().toString(),
       sender: "user",
-      text: input,
+      text: promptToSend,
       time: "Baru saja",
     };
 
     setMessages((prev) => [...prev, userMsg]);
-    const currentInput = input;
     setInput("");
     setIsBuilding(true);
 
@@ -135,7 +198,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt: currentInput, current_spec: currentSpec, history }),
+        body: JSON.stringify({ prompt: promptToSend, current_spec: currentSpec, history }),
       });
 
       if (!res.ok) {
@@ -148,15 +211,24 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
       const builderResponse: Message = {
         id: (Date.now() + 1).toString(),
         sender: "builder",
-        text: data.message || `Spesifikasi Agent '${data.spec?.name}' telah berhasil disusun dan disimpan di database.`,
+        text: data.message || `Draf spesifikasi Agent telah diperbarui.`,
         spec: data.spec,
+        is_draft: data.is_draft,
         time: "Baru saja",
       };
 
       setMessages((prev) => [...prev, builderResponse]);
 
-      if (data.spec) {
+      // HANYA update activeAgent jika sudah committed / bukan draft
+      if (data.spec && data.is_draft === false && data.spec.id) {
+        skipClearRef.current = true;
+        currentAgentIdRef.current = data.spec.id;
         onAgentCreated?.(data.spec);
+        setTimeout(() => {
+          skipClearRef.current = false;
+        }, 500);
+        setSaveSuccessMsg(`Agent '${data.spec.name}' berhasil disimpan ke database!`);
+        setTimeout(() => setSaveSuccessMsg(null), 4000);
       }
     } catch (error: any) {
       console.warn("Error building agent:", error);
@@ -177,6 +249,11 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
   };
 
   const handleReset = () => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem(getStorageKey(currentAgentIdRef.current));
+      } catch {}
+    }
     setMessages([]);
     setInput("");
     setErrorMessage(null);
@@ -211,14 +288,27 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
 
       const savedSpec: AgentSpecData = await res.json();
       
+      // Update local message status tanpa menghapus riwayat chat
+      const updatedMessages = messages.map((m) =>
+        m.spec ? { ...m, spec: savedSpec, is_draft: false } : m
+      );
+      setMessages(updatedMessages);
+
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(getStorageKey(savedSpec.id), JSON.stringify(updatedMessages));
+        } catch {}
+      }
+
       skipClearRef.current = true;
+      currentAgentIdRef.current = savedSpec.id;
       onAgentCreated?.(savedSpec);
       
       setTimeout(() => {
         skipClearRef.current = false;
-      }, 500);
+      }, 1000);
 
-      setSaveSuccessMsg(`Agent '${savedSpec.name}' berhasil disimpan ke database.`);
+      setSaveSuccessMsg(`Agent '${savedSpec.name}' berhasil disimpan ke database dan aktif untuk diuji!`);
       setTimeout(() => setSaveSuccessMsg(null), 4000);
     } catch (e: any) {
       console.warn("Error saving spec:", e);
@@ -370,7 +460,22 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
                       <div className="flex items-center gap-2">
                         <FileCode2 className="w-3.5 h-3.5 text-blue-600" />
                         <span className="text-xs font-semibold text-slate-800">
-                          Spesifikasi Agent (Tersimpan di DB: {msg.spec.id ? msg.spec.id.substring(0, 8) + '...' : 'Draft'})
+                          {msg.spec.id && !msg.is_draft ? (
+                            <span className="flex items-center gap-1.5 text-emerald-700">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                              Spesifikasi Tersimpan (DB: {msg.spec.id.substring(0, 8)}...)
+                            </span>
+                          ) : msg.spec.id ? (
+                            <span className="flex items-center gap-1.5 text-blue-700">
+                              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block animate-pulse" />
+                              Draf Perubahan (Tersimpan di DB: {msg.spec.id.substring(0, 8)}...)
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1.5 text-amber-700">
+                              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block animate-pulse" />
+                              Draf Pratinjau (Belum Disimpan di DB)
+                            </span>
+                          )}
                         </span>
                       </div>
                       <button
@@ -503,23 +608,51 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
                           </div>
                         </div>
 
-                        <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleExportYaml(msg.spec!)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium transition-colors shadow-2xs cursor-pointer"
-                            title="Unduh berkas spesifikasi deklaratif .yaml"
-                          >
-                            <FileCode2 className="w-3.5 h-3.5" />
-                            Export .YAML
-                          </button>
-                          <button
-                            onClick={() => handleSaveSpec(msg.spec!)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors shadow-2xs cursor-pointer"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Simpan Perubahan Agent
-                          </button>
+                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                          <div className="text-[11px] text-slate-400">
+                            {msg.spec.id && !msg.is_draft ? (
+                              <span className="text-emerald-600 flex items-center gap-1 font-medium">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Aktif di Test Chat
+                              </span>
+                            ) : msg.spec.id ? (
+                              <span className="text-blue-600 text-[10px] flex items-center gap-1">
+                                ℹ️ Perubahan belum diterapkan ke database
+                              </span>
+                            ) : (
+                              <span className="text-amber-600 text-[10px] flex items-center gap-1">
+                                ℹ️ Draf belum disimpan di database
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {msg.spec.id && (
+                              <button
+                                type="button"
+                                onClick={() => handleExportYaml(msg.spec!)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium transition-colors shadow-2xs cursor-pointer"
+                                title="Unduh berkas spesifikasi deklaratif .yaml"
+                              >
+                                <FileCode2 className="w-3.5 h-3.5" />
+                                Export .YAML
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleSaveSpec(msg.spec!)}
+                              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-white text-xs font-medium transition-all shadow-2xs cursor-pointer ${
+                                msg.spec.id && !msg.is_draft
+                                  ? "bg-slate-700 hover:bg-slate-800"
+                                  : "bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300 ring-offset-1 font-semibold"
+                              }`}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              {msg.spec.id && !msg.is_draft
+                                ? "Simpan Perubahan"
+                                : msg.spec.id
+                                ? "✅ Terapkan Perubahan ke DB"
+                                : "✅ Terapkan & Simpan ke DB"}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -531,24 +664,52 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
             {isBuilding && (
               <div className="flex items-center gap-2 text-xs text-blue-600 pl-10 py-2">
                 <div className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                <span>Backend sedang memproses prompt dan menyimpan Agent ke database...</span>
+                <span>Builder Agent sedang menganalisis &amp; merancang spesifikasi...</span>
               </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
         )}
       </div>
 
       {/* Bottom Input Bar */}
-      <div className="p-4 bg-white shrink-0">
+      <div className="p-4 bg-white shrink-0 border-t border-slate-100">
+        {messages.length > 0 && !isBuilding && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-2.5 px-1 text-[11px] text-slate-500">
+            <span className="text-[10px] text-slate-400 shrink-0 font-medium">Saran Balasan:</span>
+            <button
+              type="button"
+              onClick={() => handleSend("Tolong buatkan draf spesifikasi lengkapnya sekarang")}
+              className="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors whitespace-nowrap cursor-pointer"
+            >
+              📝 Buatkan draf sekarang
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSend("Tambahkan batasan keamanan dan SOP yang ketat")}
+              className="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors whitespace-nowrap cursor-pointer"
+            >
+              🛡️ Tambah batasan SOP
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSend("Sudah pas, tolong simpan agen ini ke database")}
+              className="px-2.5 py-1 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors whitespace-nowrap cursor-pointer font-medium"
+            >
+              ✅ Simpan sekarang
+            </button>
+          </div>
+        )}
+
         <form
-          onSubmit={handleSend}
+          onSubmit={(e) => handleSend(undefined, e)}
           className="relative flex items-center border border-slate-200 rounded-2xl px-3 py-2 bg-white focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition-all shadow-2xs"
         >
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ketik instruksi untuk membuat/memperbarui agent..."
+            placeholder="Ketik kebutuhan atau jawaban Anda ke Builder Agent..."
             className="flex-1 text-xs text-slate-900 placeholder:text-slate-400 outline-hidden bg-transparent pr-20 pl-1"
           />
 

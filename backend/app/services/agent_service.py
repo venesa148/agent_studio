@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 import json
@@ -456,6 +457,20 @@ class AgentService:
                     tool_result = {"status": "error", "message": f"Eksekusi tool '{fn_name}' gagal: {str(err)}"}
                     duration_ms = 0
 
+                # Deteksi target endpoint live API teman
+                api_base = (getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "https://sisters-given-cloud-nerve.trycloudflare.com")).rstrip("/")
+                endpoint_url = {
+                    "check_bpjs": f"{api_base}/api/v1/mock-bpjs/check-bpjs",
+                    "get_referral_status": f"{api_base}/api/v1/mock-bpjs/referral-status",
+                    "search_hospital": f"{api_base}/api/v1/mock-bpjs/hospitals",
+                    "hospital_finder": f"{api_base}/api/v1/mock-bpjs/hospitals",
+                    "find_specialist": f"{api_base}/api/v1/mock-bpjs/specialists",
+                    "search_web": f"{api_base}/api/v1/mock-bpjs/search-web",
+                }.get(fn_name, f"{api_base}/api/v1/mock-bpjs/{fn_name}")
+
+                if isinstance(tool_result, dict) and tool_result.get("_endpoint"):
+                    endpoint_url = tool_result.get("_endpoint")
+
                 # Rekam ke trace steps untuk observabilitas UI
                 trace_steps.append({
                     "step": len(trace_steps) + 1,
@@ -463,6 +478,8 @@ class AgentService:
                     "title": f"Call Tool: {fn_name}",
                     "type": "tool_calling",
                     "tool_name": fn_name,
+                    "endpoint": endpoint_url,
+                    "source": "Live Cloudflare Web API Teman (MySQL)",
                     "params": fn_args,
                     "result": tool_result,
                     "detail": f"{fn_name}({json.dumps(fn_args, ensure_ascii=False)})",

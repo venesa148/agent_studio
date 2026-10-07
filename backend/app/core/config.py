@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "z-ai/glm-5.3"
     LLM_API_KEY: str = ""
 
+    EXTERNAL_MOCK_API_URL: str = "https://sisters-given-cloud-nerve.trycloudflare.com"
     API_KEY_SECRET: str = "agent_studio_secret_key_2026"
     REQUIRE_API_KEY: bool = False
 
