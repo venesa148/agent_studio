@@ -3,3 +3,17 @@
 .env.*
 !.env.example
 backend/.env.example
+
+# Python Virtual Environments & Scratch
+.venv/
+*/.venv/
+venv/
+*/venv/
+*.egg-info/
+*.pyc
+__pycache__/
+*/__pycache__/
+
+# Node & Next.js
+node_modules/
+.next/

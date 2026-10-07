@@ -60,6 +60,21 @@ async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent dengan ID '{agent_id}' tidak ditemukan.")
     return None
 
+@router.get("/{agent_id}/history")
+async def get_agent_history(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Mengambil seluruh riwayat pesan percakapan (working memory) untuk Agent ini dari database.
+    """
+    return await AgentService.get_agent_history(db, agent_id)
+
+@router.delete("/{agent_id}/history", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_agent_history(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Mereset atau membersihkan riwayat percakapan Agent ini di database.
+    """
+    await AgentService.clear_agent_history(db, agent_id)
+    return None
+
 @router.post("/chat", response_model=AgentTestResponse)
 async def agent_chat_test(payload: AgentTestRequest, db: AsyncSession = Depends(get_db)):
     """
@@ -74,3 +89,22 @@ async def agent_chat_test(payload: AgentTestRequest, db: AsyncSession = Depends(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Gagal memproses pesan agent: {str(e)}")
+
+@router.get("/{agent_id}/export-yaml")
+async def export_agent_yaml(agent_id: str, download: bool = False, db: AsyncSession = Depends(get_db)):
+    """
+    Mengekspor spesifikasi Agent ke format deklaratif .YAML.
+    """
+    res = await AgentService.export_agent_yaml(db, agent_id, save_to_disk=True)
+    if not res:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent dengan ID '{agent_id}' tidak ditemukan.")
+
+    if download:
+        from fastapi.responses import Response
+        filename = res["filename"]
+        return Response(
+            content=res["yaml"],
+            media_type="application/x-yaml",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    return res

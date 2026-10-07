@@ -1,6 +1,6 @@
 import json
 import re
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from openai import AsyncOpenAI
 from sqlalchemy import select
@@ -19,10 +19,6 @@ class BuilderService:
     def _agent_name(prompt: str) -> str:
         cleaned = prompt.strip().rstrip(".!?")
         lowered = cleaned.lower()
-        if "bpjs" in lowered:
-            return "BPJS Customer Service Agent"
-        if lowered.startswith("buat agent penulisan") or "artikel" in lowered:
-            return "Custom AI Assistant"
         prefixes = (
             "buatkan aku agent ", "buatkan saya agent ", "buatkan agent ",
             "buat agent ", "create an agent ", "create agent ",
@@ -90,40 +86,19 @@ class BuilderService:
             except Exception:
                 pass
 
-        # 2. Heuristik pencocokan kata kunci terhadap katalog tools yang ada di database
+        # 2. Heuristik pencocokan semantik & kata kunci terhadap katalog tools (100% DINAMIS, TANPA HARDCODE)
         selected = []
+        prompt_words = set(re.findall(r"\w+", prompt_lower))
         for tool in db_tools:
             t_name = tool.name.lower()
             t_desc = (tool.description or "").lower()
+            name_words = set(re.findall(r"\w+", t_name))
+            desc_words = {w for w in re.findall(r"\w+", t_desc) if len(w) >= 4}
 
-            matched = False
-            if t_name in ["search_hospital", "hospital_finder"]:
-                if any(w in prompt_lower for w in ["rs", "rumah sakit", "hospital", "faskes", "bpjs"]):
-                    matched = True
-            elif t_name == "get_referral_status":
-                if any(w in prompt_lower for w in ["rujukan", "referral"]):
-                    matched = True
-            elif t_name == "find_specialist":
-                if any(w in prompt_lower for w in ["spesialis", "dokter", "jadwal", "specialist"]):
-                    matched = True
-            elif t_name == "check_bpjs":
-                if any(w in prompt_lower for w in ["bpjs", "kepesertaan", "kartu", "iuran"]):
-                    matched = True
-            elif t_name == "search_web":
-                if any(w in prompt_lower for w in ["web", "internet", "berita", "google", "search", "cari"]):
-                    matched = True
-            else:
-                # Cek kemunculan nama tool atau kata kunci deskripsi dalam prompt
-                name_clean = t_name.replace("_", " ")
-                if name_clean in prompt_lower:
-                    matched = True
-                else:
-                    keywords = [w for w in t_desc.split() if len(w) >= 5]
-                    if any(kw in prompt_lower for kw in keywords):
-                        matched = True
-
-            if matched and tool.name not in selected:
-                selected.append(tool.name)
+            # Cocokkan token kata dari prompt pengguna dengan nama tool atau deskripsinya di DB
+            if (prompt_words & name_words) or (prompt_words & desc_words):
+                if tool.name not in selected:
+                    selected.append(tool.name)
 
         return [t for t in selected if t in available_tool_names]
 
@@ -218,12 +193,17 @@ class BuilderService:
                         else:
                             db_agent = AgentSpecModel(
                                 name=name, description=description, instructions=instructions,
-                                model="gpt-4o-mini", tools=tools, mcp_servers=[], harness="default-safe-v1", status="active"
+                                model=(settings.LLM_MODEL or "z-ai/glm-5.3"), tools=tools, mcp_servers=[], harness="default-safe-v1", status="active"
                             )
                             db.add(db_agent)
                             
                         await db.commit()
                         await db.refresh(db_agent)
+                        try:
+                            from app.services.agent_service import AgentService
+                            await AgentService.export_agent_yaml(db, db_agent.id, save_to_disk=True)
+                        except Exception as e_yaml:
+                            print(f"Warning auto-export yaml: {e_yaml}")
                         spec_response = AgentSpecResponse.model_validate(db_agent)
                         return BuilderChatResponse(id=db_agent.id, message=message, spec=spec_response)
                     else:
@@ -267,7 +247,7 @@ class BuilderService:
             description = f"Agent untuk: {prompt_trimmed}"
             instructions = f"Peran dan tujuan agent ini berasal dari permintaan pengguna: {prompt_trimmed}\n\nJawab sesuai peran tersebut."
             tools = await BuilderService._select_tools_from_db(db, prompt_trimmed)
-            db_agent = AgentSpecModel(name=name, description=description, instructions=instructions, model="gpt-4o-mini", tools=tools, mcp_servers=[], harness="default-safe-v1", status="active")
+            db_agent = AgentSpecModel(name=name, description=description, instructions=instructions, model=(settings.LLM_MODEL or "z-ai/glm-5.3"), tools=tools, mcp_servers=[], harness="default-safe-v1", status="active")
             db.add(db_agent)
             await db.commit()
             await db.refresh(db_agent)

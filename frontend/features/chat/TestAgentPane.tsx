@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Globe,
   Plus,
+  FileCode2,
 } from "lucide-react";
 import { AgentSpecData } from "@/app/page";
 
@@ -68,14 +69,46 @@ export function TestAgentPane({
   const [accessLevel, setAccessLevel] = useState<"Public" | "Restricted">("Public");
   const [showAccessDropdown, setShowAccessDropdown] = useState(false);
 
-  // Clear messages when activeAgent changes
+  // Sync and load working memory history when activeAgent changes
   useEffect(() => {
-    setMessages([]);
     setTraceSteps([]);
     setErrorMessage(null);
     if (activeAgent?.name) {
       setDomainSlug(activeAgent.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
     }
+
+    if (!activeAgent?.id) {
+      setMessages([]);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch(`http://localhost:8000/api/v1/agent/${activeAgent.id}/history`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && Array.isArray(data)) {
+            const historyMsgs: ChatMessage[] = data.map((m: any) => ({
+              id: m.id,
+              sender: m.role === "user" ? "user" : "agent",
+              text: m.content,
+              time: m.created_at
+                ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                : "Tersimpan",
+            }));
+            setMessages(historyMsgs);
+          }
+        }
+      } catch (err) {
+        console.warn("Gagal memuat riwayat chat agent:", err);
+      }
+    };
+
+    fetchHistory();
+    return () => {
+      isMounted = false;
+    };
   }, [activeAgent?.id]);
 
   const handleSendChat = async (e?: React.FormEvent) => {
@@ -151,10 +184,39 @@ export function TestAgentPane({
     }
   };
 
-  const handleClear = () => {
+  const handleClear = async () => {
     setMessages([]);
     setTraceSteps([]);
     setErrorMessage(null);
+    if (activeAgent?.id) {
+      try {
+        await fetch(`http://localhost:8000/api/v1/agent/${activeAgent.id}/history`, {
+          method: "DELETE",
+        });
+      } catch (err) {
+        console.warn("Gagal mereset sesi percakapan di database:", err);
+      }
+    }
+  };
+
+  const handleExportYaml = async () => {
+    if (!activeAgent?.id) return;
+    try {
+      const res = await fetch(`http://localhost:8000/api/v1/agent/${activeAgent.id}/export-yaml?download=true`);
+      if (!res.ok) throw new Error("Gagal mengunduh berkas YAML.");
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      const cleanSlug = (activeAgent.name || "agent").toLowerCase().replace(/[^a-z0-9]+/g, "_");
+      a.download = `${cleanSlug}.yaml`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.warn("Gagal mengekspor YAML:", err);
+    }
   };
 
   return (
@@ -224,6 +286,17 @@ export function TestAgentPane({
           >
             <Activity className="w-3.5 h-3.5" />
             <span>Trace ({traceSteps.length})</span>
+          </button>
+
+          {/* Tombol Export YAML */}
+          <button
+            onClick={handleExportYaml}
+            disabled={!activeAgent}
+            title="Download Declarative Spec (.yaml)"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer shadow-2xs disabled:opacity-50 ml-1"
+          >
+            <FileCode2 className="w-3.5 h-3.5 text-slate-600" />
+            <span>YAML</span>
           </button>
 
           {/* Tombol Publish persis di samping Tab Trace */}
@@ -587,28 +660,85 @@ export function TestAgentPane({
                 Belum ada trace eksekusi. Kirim pesan pada chat testing untuk melihat jejak eksekusi backend.
               </div>
             ) : (
-              traceSteps.map((step) => (
-                <div
-                  key={step.step_no}
-                  className="relative pl-5 border-l-2 border-blue-200 pb-3 last:border-transparent last:pb-0"
-                >
-                  <span className="absolute -left-[5px] top-0.5 w-2 h-2 rounded-full bg-blue-600 ring-4 ring-white" />
+              traceSteps.map((step, idx) => {
+                const stepNum = step.step_no ?? step.step ?? idx + 1;
+                const toolName = step.tool_name ?? step.title ?? "Eksekusi Tool";
+                const isError = step.status === "error";
+                const paramsStr = step.params
+                  ? typeof step.params === "object"
+                    ? JSON.stringify(step.params, null, 2)
+                    : String(step.params)
+                  : null;
+                const resultStr = step.result
+                  ? typeof step.result === "object"
+                    ? JSON.stringify(step.result, null, 2)
+                    : String(step.result)
+                  : step.detail ?? null;
 
-                  <div className="bg-white border border-slate-200 rounded-xl p-2.5 shadow-2xs space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-800">
-                        {step.step_no}. {step.title}
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-400">
-                        {step.duration_ms}ms
-                      </span>
+                return (
+                  <div
+                    key={stepNum}
+                    className="relative pl-5 border-l-2 border-blue-200 pb-3 last:border-transparent last:pb-0"
+                  >
+                    <span
+                      className={`absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white ${
+                        isError ? "bg-rose-500" : "bg-blue-600"
+                      }`}
+                    />
+
+                    <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-800">
+                            Step {stepNum}:
+                          </span>
+                          <span className="px-2 py-0.5 text-[11px] font-mono font-semibold rounded bg-blue-50 text-blue-700 border border-blue-200">
+                            {toolName}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {step.duration_ms !== undefined && (
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {step.duration_ms}ms
+                            </span>
+                          )}
+                          <span
+                            className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                              isError
+                                ? "bg-rose-50 text-rose-600 border border-rose-200"
+                                : "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                            }`}
+                          >
+                            {isError ? "ERROR" : "OK"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {paramsStr && (
+                        <div>
+                          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">
+                            Parameter Input
+                          </div>
+                          <pre className="text-[11px] text-slate-700 font-mono bg-slate-50 p-2 rounded border border-slate-100 overflow-x-auto whitespace-pre-wrap">
+                            {paramsStr}
+                          </pre>
+                        </div>
+                      )}
+
+                      {resultStr && (
+                        <div>
+                          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">
+                            Hasil Tool (Output)
+                          </div>
+                          <pre className="text-[11px] text-slate-700 font-mono bg-slate-50 p-2 rounded border border-slate-100 overflow-x-auto max-h-36 whitespace-pre-wrap">
+                            {resultStr}
+                          </pre>
+                        </div>
+                      )}
                     </div>
-                    <p className="text-[11px] text-slate-600 font-mono bg-slate-50 p-1.5 rounded">
-                      {step.detail}
-                    </p>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

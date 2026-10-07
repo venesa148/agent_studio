@@ -223,6 +223,36 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentCh
     }
   };
 
+  const handleExportYaml = async (spec: AgentSpecData) => {
+    if (!spec.id) {
+      setErrorMessage("Agent belum tersimpan di database. Silakan klik 'Simpan Perubahan Agent' terlebih dahulu.");
+      return;
+    }
+    setErrorMessage(null);
+    try {
+      const res = await fetch(`http://localhost:8000/api/v1/agent/${spec.id}/export-yaml?download=true`);
+      if (!res.ok) {
+        throw new Error("Gagal mengunduh berkas YAML dari backend.");
+      }
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      const cleanSlug = (spec.name || "agent").toLowerCase().replace(/[^a-z0-9]+/g, "_");
+      a.download = `${cleanSlug}.yaml`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      document.body.removeChild(a);
+
+      setSaveSuccessMsg(`Berkas deklaratif '${a.download}' berhasil diunduh dan tersimpan di folder agents/!`);
+      setTimeout(() => setSaveSuccessMsg(null), 5000);
+    } catch (err: any) {
+      console.warn("Error exporting YAML:", err);
+      setErrorMessage(err.message || "Gagal mengunduh berkas YAML.");
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-white border-r border-slate-200/80 min-w-0">
       {/* Top Bar */}
@@ -470,7 +500,16 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentCh
                           </div>
                         </div>
 
-                        <div className="pt-2 border-t border-slate-100 flex justify-end">
+                        <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleExportYaml(msg.spec!)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium transition-colors shadow-2xs cursor-pointer"
+                            title="Unduh berkas spesifikasi deklaratif .yaml"
+                          >
+                            <FileCode2 className="w-3.5 h-3.5" />
+                            Export .YAML
+                          </button>
                           <button
                             onClick={() => handleSaveSpec(msg.spec!)}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors shadow-2xs cursor-pointer"

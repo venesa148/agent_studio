@@ -22,9 +22,10 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_DEFAULT_MODEL: str = "gpt-4o-mini"
 
-    # LiteLLM
-    LLM_BASE_URL: str = "https://litellm.pkc.pub/v1"
-    LLM_MODEL: str = "glm-5.3-flash"
+    # LLM / OpenRouter Provider Configuration
+    OPENROUTER_API_KEY: str = ""
+    LLM_BASE_URL: str = "https://openrouter.ai/api/v1"
+    LLM_MODEL: str = "z-ai/glm-5.3"
     LLM_API_KEY: str = ""
 
     API_KEY_SECRET: str = "agent_studio_secret_key_2026"
@@ -43,10 +44,17 @@ class Settings(BaseSettings):
                 self.DATABASE_URL = f"{driver}://{user}:{pwd}@{host}:{port}/{db_name}"
             else:
                 self.DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/agent_studio"
+
+        # Sinkronisasi API Key (bisa pakai OPENROUTER_API_KEY atau LLM_API_KEY)
+        if not self.LLM_API_KEY and self.OPENROUTER_API_KEY:
+            self.LLM_API_KEY = self.OPENROUTER_API_KEY
+        elif not self.OPENROUTER_API_KEY and self.LLM_API_KEY:
+            self.OPENROUTER_API_KEY = self.LLM_API_KEY
+
         return self
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "backend/.env"),
+        env_file=(".env", "backend/.env", "../backend/.env"),
         env_file_encoding="utf-8",
         extra="ignore"
     )
