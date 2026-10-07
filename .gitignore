@@ -4,16 +4,20 @@
 !.env.example
 backend/.env.example
 
-# Python Virtual Environments & Scratch
-.venv/
-*/.venv/
-venv/
-*/venv/
-*.egg-info/
-*.pyc
+# Python
 __pycache__/
-*/__pycache__/
+*.py[cod]
+*$py.class
+*.venv/
+.venv/
+env/
+venv/
+*.egg-info/
+dist/
+build/
 
-# Node & Next.js
+# Node
 node_modules/
 .next/
+out/
+

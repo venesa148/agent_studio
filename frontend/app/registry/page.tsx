@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 export type ToolsTab = "all_tools" | "mcp_servers";
-const API_URL = "http://localhost:8000/api/v1";
+const API_URL = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1`;
 
 export default function ToolsRegistryPage() {
   const [activeTab, setActiveTab] = useState<ToolsTab>("all_tools");

@@ -23,6 +23,17 @@ import {
   Globe,
   Plus,
   FileCode2,
+  Loader2,
+  Copy,
+  Key,
+  CheckCircle2,
+  FileCode,
+  Upload,
+  FileText,
+  ChevronUp,
+  Sparkles,
+  Layers,
+  Code,
 } from "lucide-react";
 import { AgentSpecData } from "@/app/page";
 
@@ -62,12 +73,202 @@ export function TestAgentPane({
   const [traceSteps, setTraceSteps] = useState<any[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Publish popover states (from latest pull)
+  // Publish popover states
   const [isPublished, setIsPublished] = useState(false);
   const [showPublishPopover, setShowPublishPopover] = useState(false);
   const [domainSlug, setDomainSlug] = useState("");
   const [accessLevel, setAccessLevel] = useState<"Public" | "Restricted">("Public");
   const [showAccessDropdown, setShowAccessDropdown] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [deployedInfo, setDeployedInfo] = useState<any>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
+  const [copiedEndpoint, setCopiedEndpoint] = useState(false);
+
+  // Dynamic YAML Config Selector states
+  const [configSource, setConfigSource] = useState<"chat_agent" | "server_yaml" | "upload_yaml">("chat_agent");
+  const [serverYamlFiles, setServerYamlFiles] = useState<Array<{ filename: string; name: string; description: string; content: string }>>([]);
+  const [selectedServerFile, setSelectedServerFile] = useState<string>("agent.yaml");
+  const [customYamlContent, setCustomYamlContent] = useState<string>("");
+  const [showYamlEditor, setShowYamlEditor] = useState<boolean>(false);
+  const [uploadedFileName, setUploadedFileName] = useState<string>("");
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  // Helper untuk generate YAML dari activeAgent di chat
+  const generateYamlFromAgent = (agent: AgentSpecData): string => {
+    const agentId = agent.id || `agent-${Date.now()}`;
+    const instructions = agent.instructions || "Kamu adalah asisten AI yang ramah dan membantu.";
+    return `# Konfigurasi otomatis dari sesi chat Agent Studio
+agent_id: "${agentId}"
+name: "${agent.name || 'AI Assistant'}"
+description: >
+  ${agent.description || 'Agent dibuat melalui sesi chat Agent Studio'}
+version: 1
+status: "active"
+
+model:
+  provider: "openai"
+  name: "${agent.model || 'gpt-4o-mini'}"
+  temperature: 0.3
+  max_tokens: 1024
+
+system_prompt: >
+  ${instructions}
+
+flow:
+  entry_node: "main_step"
+  nodes:
+    - id: "main_step"
+      type: "llm_step"
+      instruction: "${instructions}"
+      next: "selesai"
+    - id: "selesai"
+      type: "end"
+
+tools_required: ${JSON.stringify(agent.tools || [])}
+`;
+  };
+
+  // Ambil daftar file YAML dari backend
+  const fetchYamlFiles = async () => {
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/deployment/yaml-files`);
+      if (res.ok) {
+        const files = await res.json();
+        setServerYamlFiles(files);
+      }
+    } catch (e) {
+      console.warn("Gagal mengambil file YAML backend:", e);
+    }
+  };
+
+  // Ambil status deployment dan daftar file YAML saat komponen dimuat
+  useEffect(() => {
+    fetch(`${apiUrl}/api/v1/deployment/status`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.status === "live") {
+          setIsPublished(true);
+          setDeployedInfo(data);
+        }
+      })
+      .catch(() => {});
+
+    fetchYamlFiles();
+  }, [apiUrl]);
+
+  // Set default YAML saat activeAgent tersedia
+  useEffect(() => {
+    if (activeAgent) {
+      const generated = generateYamlFromAgent(activeAgent);
+      if (configSource === "chat_agent") {
+        setCustomYamlContent(generated);
+      }
+    }
+  }, [activeAgent, configSource]);
+
+  // Handler saat mengganti sumber YAML
+  const handleSelectConfigSource = (source: "chat_agent" | "server_yaml" | "upload_yaml") => {
+    setConfigSource(source);
+    if (source === "chat_agent") {
+      if (activeAgent) {
+        setCustomYamlContent(generateYamlFromAgent(activeAgent));
+        setDomainSlug(activeAgent.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+      } else {
+        setCustomYamlContent("");
+      }
+    } else if (source === "server_yaml") {
+      const file = serverYamlFiles.find((f) => f.filename === selectedServerFile) || serverYamlFiles[0];
+      if (file) {
+        setCustomYamlContent(file.content);
+        setSelectedServerFile(file.filename);
+        setDomainSlug(file.filename.replace(/\.ya?ml$/, ""));
+      }
+    } else if (source === "upload_yaml") {
+      setCustomYamlContent("");
+      setUploadedFileName("");
+    }
+  };
+
+  const handleSelectServerFile = (filename: string) => {
+    setSelectedServerFile(filename);
+    const file = serverYamlFiles.find((f) => f.filename === filename);
+    if (file) {
+      setCustomYamlContent(file.content);
+      setDomainSlug(file.filename.replace(/\.ya?ml$/, ""));
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadedFileName(file.name);
+    const slugName = file.name.replace(/\.ya?ml$/i, "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    setDomainSlug(slugName);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = (event.target?.result as string) || "";
+      setCustomYamlContent(content);
+    };
+    reader.readAsText(file);
+  };
+
+  const handlePublishAgent = async () => {
+    setIsPublishing(true);
+    setPublishError(null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/deployment/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          slug: domainSlug || "agent",
+          access_level: accessLevel,
+          custom_yaml: customYamlContent.trim() ? customYamlContent : undefined,
+        }),
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Gagal mempublikasikan agent");
+      }
+
+      const data = await res.json();
+      setIsPublished(true);
+      setDeployedInfo(data);
+
+      // Sync ke tabel deployments (fitur rekan tim) jika endpoint tersedia
+      try {
+        await fetch(`${apiUrl}/api/v1/deployments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agent: activeAgent?.name || data.agent_name || "Unknown Agent",
+            environment: "production",
+            path: `/api/agents/${domainSlug || activeAgent?.id}/run`,
+            status: "Ready",
+          }),
+        });
+      } catch (err) {
+        // Abaikan jika database/tabel deployments belum siap
+      }
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        setPublishError("Koneksi ke backend timeout. Pastikan backend aktif.");
+      } else {
+        setPublishError(err.message || "Gagal menghubungkan ke server deployment");
+      }
+    } finally {
+      setIsPublishing(false);
+    }
+  };
 
   // Sync and load working memory history when activeAgent changes
   useEffect(() => {
@@ -85,7 +286,7 @@ export function TestAgentPane({
     let isMounted = true;
     const fetchHistory = async () => {
       try {
-        const res = await fetch(`http://localhost:8000/api/v1/agent/${activeAgent.id}/history`);
+        const res = await fetch(`${apiUrl}/api/v1/agent/${activeAgent.id}/history`);
         if (res.ok) {
           const data = await res.json();
           if (isMounted && Array.isArray(data)) {
@@ -133,8 +334,11 @@ export function TestAgentPane({
     setInput("");
     setIsRunning(true);
 
+    const chatController = new AbortController();
+    const chatTimeoutId = setTimeout(() => chatController.abort(), 30000); // 30 detik timeout
+
     try {
-      const res = await fetch("http://localhost:8000/api/v1/agent/chat", {
+      const res = await fetch(`${apiUrl}/api/v1/agent/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -143,7 +347,9 @@ export function TestAgentPane({
           agent_id: activeAgent.id,
           message: userText,
         }),
+        signal: chatController.signal,
       });
+      clearTimeout(chatTimeoutId);
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -166,15 +372,19 @@ export function TestAgentPane({
         setTraceSteps(data.trace_steps);
       }
     } catch (error: any) {
+      clearTimeout(chatTimeoutId);
       console.warn("Error testing agent:", error);
-      const errTxt = error.message || "Maaf, terjadi kesalahan saat menghubungi Agent Backend.";
+      const errTxt =
+        error.name === "AbortError"
+          ? "⏱️ Request timeout (30 detik). Backend lambat atau LLM tidak merespons. Pastikan OPENAI_API_KEY sudah diset di backend/.env"
+          : error.message || "Maaf, terjadi kesalahan saat menghubungi Agent Backend.";
       setErrorMessage(errTxt);
       setMessages((prev) => [
         ...prev,
         {
           id: (Date.now() + 1).toString(),
           sender: "agent",
-          text: `⚠️ Gagal Eksekusi: ${errTxt}`,
+          text: `⚠️ ${errTxt}`,
           status: "error",
           time: "Sekarang",
         },
@@ -320,9 +530,17 @@ export function TestAgentPane({
                   className="fixed inset-0 z-30"
                   onClick={() => setShowPublishPopover(false)}
                 />
-                <div className="absolute right-0 top-10 mt-1 w-80 sm:w-96 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl z-40 text-xs space-y-4 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-bold text-slate-900">Publish Agent</h4>
+                <div className="absolute right-0 top-10 mt-1 w-80 sm:w-[440px] max-h-[85vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl z-40 text-xs space-y-4 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+                        <Globe className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">Publish Agent</h4>
+                        <p className="text-[10px] text-slate-500">Deploy agent ke Dedicated AWS Runtime</p>
+                      </div>
+                    </div>
                     <Link
                       href="/deployments"
                       onClick={() => setShowPublishPopover(false)}
@@ -333,6 +551,150 @@ export function TestAgentPane({
                     </Link>
                   </div>
 
+                  {/* 1. Sumber Konfigurasi YAML (Dinamis) */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="font-semibold text-slate-700 text-[11px] flex items-center gap-1.5">
+                        <FileCode className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Sumber Konfigurasi (.yaml)</span>
+                      </label>
+                      <span className="text-[10px] text-slate-400 font-medium">Pilih file deploy</span>
+                    </div>
+
+                    {/* 3 Tab Selector */}
+                    <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectConfigSource("chat_agent")}
+                        className={`py-1.5 px-1.5 rounded-lg font-semibold text-[10.5px] transition-all flex items-center justify-center gap-1 ${
+                          configSource === "chat_agent"
+                            ? "bg-white text-blue-700 shadow-2xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />
+                        <span className="truncate">Sesi Chat</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSelectConfigSource("server_yaml")}
+                        className={`py-1.5 px-1.5 rounded-lg font-semibold text-[10.5px] transition-all flex items-center justify-center gap-1 ${
+                          configSource === "server_yaml"
+                            ? "bg-white text-blue-700 shadow-2xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        <Layers className="w-3 h-3 text-indigo-500 shrink-0" />
+                        <span className="truncate">File Server</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSelectConfigSource("upload_yaml")}
+                        className={`py-1.5 px-1.5 rounded-lg font-semibold text-[10.5px] transition-all flex items-center justify-center gap-1 ${
+                          configSource === "upload_yaml"
+                            ? "bg-white text-blue-700 shadow-2xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        <Upload className="w-3 h-3 text-emerald-500 shrink-0" />
+                        <span className="truncate">Upload</span>
+                      </button>
+                    </div>
+
+                    {/* Konten detail sesuai sumber terpilih */}
+                    {configSource === "chat_agent" && (
+                      <div className="p-2.5 rounded-xl border border-blue-100 bg-blue-50/40 flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Bot className="w-4 h-4 text-blue-600 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-800 text-[11px] truncate">
+                              {activeAgent?.name || "Agent Sesi Chat Saat Ini"}
+                            </div>
+                            <div className="text-[10px] text-slate-500 truncate">
+                              {activeAgent?.description || "Dikonversi otomatis dari sesi chat builder"}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold shrink-0 ml-2">
+                          Auto-YAML
+                        </span>
+                      </div>
+                    )}
+
+                    {configSource === "server_yaml" && (
+                      <div className="space-y-1.5">
+                        <select
+                          value={selectedServerFile}
+                          onChange={(e) => handleSelectServerFile(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50/60 text-xs font-medium text-slate-800 outline-hidden focus:border-blue-500 focus:bg-white"
+                        >
+                          {serverYamlFiles.map((f) => (
+                            <option key={f.filename} value={f.filename}>
+                              📄 {f.name} ({f.filename})
+                            </option>
+                          ))}
+                        </select>
+                        <div className="text-[10px] text-slate-500 px-1">
+                          {serverYamlFiles.find((f) => f.filename === selectedServerFile)?.description || "File konfigurasi YAML dari server backend"}
+                        </div>
+                      </div>
+                    )}
+
+                    {configSource === "upload_yaml" && (
+                      <div>
+                        <label className="flex flex-col items-center justify-center p-3 border-2 border-dashed border-slate-200 hover:border-blue-400 bg-slate-50/50 hover:bg-blue-50/20 rounded-xl cursor-pointer transition-all">
+                          <Upload className="w-4 h-4 text-slate-400 mb-1" />
+                          <span className="text-[11px] font-semibold text-slate-700">
+                            {uploadedFileName ? `📄 ${uploadedFileName}` : "Pilih file .yaml dari komputer"}
+                          </span>
+                          <span className="text-[10px] text-slate-400">Klik untuk browse file YAML</span>
+                          <input
+                            type="file"
+                            accept=".yaml,.yml"
+                            onChange={handleFileUpload}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    )}
+
+                    {/* Collapsible Preview & Edit YAML Code */}
+                    <div className="pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setShowYamlEditor(!showYamlEditor)}
+                        className="flex items-center justify-between w-full text-[11px] text-slate-600 hover:text-blue-600 font-medium py-1 transition-colors"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Code className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Preview / Edit YAML ({customYamlContent ? customYamlContent.split('\n').length : 0} baris)</span>
+                        </span>
+                        <span className="text-[10px] text-blue-600 font-semibold">
+                          {showYamlEditor ? "Tutup" : "Buka"}
+                        </span>
+                      </button>
+
+                      {showYamlEditor && (
+                        <div className="mt-1.5 rounded-xl border border-slate-800 overflow-hidden bg-slate-950 text-slate-100 shadow-inner">
+                          <div className="px-3 py-1 bg-slate-900 text-[10px] text-slate-400 font-mono flex items-center justify-between border-b border-slate-800">
+                            <span>YAML Specification</span>
+                            <span>Editable</span>
+                          </div>
+                          <textarea
+                            value={customYamlContent}
+                            onChange={(e) => setCustomYamlContent(e.target.value)}
+                            rows={7}
+                            className="w-full p-2.5 bg-slate-950 text-emerald-400 font-mono text-[10.5px] outline-hidden resize-y leading-relaxed"
+                            placeholder="Ketik atau paste konfigurasi agent.yaml..."
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 2. Domain / Slug */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-[11px]">
                       <label className="font-semibold text-slate-700">Domain / Slug</label>
@@ -413,40 +775,94 @@ export function TestAgentPane({
                     </div>
                   </div>
 
+                  {publishError && (
+                    <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-[11px] flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{publishError}</span>
+                    </div>
+                  )}
+
+                  {isPublished && deployedInfo && (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] space-y-2">
+                      <div className="flex items-center justify-between text-emerald-800 font-bold">
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          Agent Live & Aktif!
+                        </span>
+                        <span className="text-[10px] bg-emerald-200/60 px-1.5 py-0.5 rounded font-mono">
+                          v{deployedInfo.version}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="text-[10px] text-emerald-700 font-semibold">Live Invoke Endpoint:</div>
+                        <div className="flex items-center gap-1 bg-white p-1.5 rounded-lg border border-emerald-200 font-mono text-[10px] text-slate-800 overflow-x-auto">
+                          <span className="truncate flex-1">{deployedInfo.endpoint}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(deployedInfo.endpoint);
+                              setCopiedEndpoint(true);
+                              setTimeout(() => setCopiedEndpoint(false), 2000);
+                            }}
+                            className="p-1 hover:bg-slate-100 rounded text-slate-500"
+                            title="Copy Endpoint"
+                          >
+                            {copiedEndpoint ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="text-[10px] text-emerald-700 font-semibold">API Key:</div>
+                        <div className="flex items-center gap-1 bg-white p-1.5 rounded-lg border border-emerald-200 font-mono text-[10px] text-slate-800 overflow-x-auto">
+                          <span className="truncate flex-1">{deployedInfo.api_key}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(deployedInfo.api_key);
+                              setCopiedKey(true);
+                              setTimeout(() => setCopiedKey(false), 2000);
+                            }}
+                            className="p-1 hover:bg-slate-100 rounded text-slate-500"
+                            title="Copy Key"
+                          >
+                            {copiedKey ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="pt-2 flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={async () => {
-                        if (!isPublished) {
-                          try {
-                            const res = await fetch("http://localhost:8000/api/v1/deployments", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                agent: activeAgent?.name || "Unknown Agent",
-                                environment: "production",
-                                path: `/api/agents/${domainSlug || activeAgent?.id}/run`,
-                                status: "Ready"
-                              }),
-                            });
-                            if (res.ok) {
-                              setIsPublished(true);
-                            } else {
-                              alert("Failed to publish agent");
-                            }
-                          } catch (err) {
-                            console.error(err);
-                            alert("Error publishing agent");
-                          }
-                        } else {
-                          setIsPublished(false);
-                        }
-                        setShowPublishPopover(false);
-                      }}
-                      className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-center shadow-2xs transition-colors cursor-pointer text-xs"
+                      disabled={isPublishing}
+                      onClick={handlePublishAgent}
+                      className="flex-1 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold text-center shadow-2xs transition-colors cursor-pointer text-xs flex items-center justify-center gap-1.5"
                     >
-                      {isPublished ? "Unpublish" : "Publish Agent"}
+                      {isPublishing ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Publishing ke Runtime...</span>
+                        </>
+                      ) : (
+                        <span>{isPublished ? "Perbarui / Re-Publish" : "Publish Agent"}</span>
+                      )}
                     </button>
+                    {isPublished && (
+                      <button
+                        type="button"
+                        disabled={isPublishing}
+                        onClick={() => {
+                          setIsPublished(false);
+                          setShowPublishPopover(false);
+                        }}
+                        className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-center transition-colors cursor-pointer text-xs"
+                      >
+                        Unpublish
+                      </button>
+                    )}
                   </div>
                 </div>
               </>

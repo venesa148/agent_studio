@@ -18,17 +18,31 @@ import {
 } from "lucide-react";
 
 export default function DeploymentsPage() {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedEndpoint, setCopiedEndpoint] = useState(false);
   const [activeSnippetTab, setActiveSnippetTab] = useState<"curl" | "js" | "python">("curl");
+  const [deployInfo, setDeployInfo] = useState<any>(null);
 
   const [deployments, setDeployments] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  const fetchDeployStatus = async () => {
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/deployment/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setDeployInfo(data);
+      }
+    } catch (e) {
+      console.warn("Gagal mengambil status deploy:", e);
+    }
+  };
+
   const fetchDeployments = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch("http://localhost:8000/api/v1/deployments");
+      const res = await fetch(`${apiUrl}/api/v1/deployments`);
       if (res.ok) {
         const data = await res.json();
         setDeployments(data);
@@ -41,12 +55,13 @@ export default function DeploymentsPage() {
   };
 
   useEffect(() => {
+    fetchDeployStatus();
     fetchDeployments();
   }, []);
 
   const handleCreateDeployment = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/v1/deployments", {
+      const res = await fetch(`${apiUrl}/api/v1/deployments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -67,7 +82,7 @@ export default function DeploymentsPage() {
   const handleDeleteDeployment = async (id: string) => {
     if (!confirm("Are you sure you want to delete this deployment?")) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/deployments/${id}`, {
+      const res = await fetch(`${apiUrl}/api/v1/deployments/${id}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -78,8 +93,8 @@ export default function DeploymentsPage() {
     }
   };
 
-  const sampleEndpoint = "http://localhost:8000/api/agents/bpjs-cs-agent/run";
-  const apiKey = "agy_live_9f82a17b8c34e91204";
+  const sampleEndpoint = deployInfo?.endpoint || "http://localhost:8080/invoke";
+  const apiKey = deployInfo?.api_key || "agy_live_9f82a17b8c34e91204";
 
   const handleCopy = (text: string, type: "key" | "endpoint") => {
     navigator.clipboard.writeText(text);

@@ -1,0 +1,108 @@
+spec_version: v1.0
+metadata:
+  id: bpjs-triase-rs-001
+  name: Agent Triase BPJS RS
+  slug: bpjs-triase-rs
+  description: >
+    Menerima keluhan pasien, mengklasifikasikan tingkat urgensi,
+    dan menjadwalkan pertemuan dokter jika diperlukan penanganan lanjut.
+  version: 1
+  status: active
+  created_at: '2026-10-07T00:00:00'
+  updated_at: '2026-10-07T00:00:00'
+
+configuration:
+  model: claude-sonnet-4-5
+  harness: default-safe-v1
+
+tools:
+  - mcp_hospital_doctor_search
+  - mcp_calendar_booking
+
+instructions: >
+  Kamu adalah asisten triase rumah sakit untuk pasien BPJS.
+  Dengarkan keluhan pasien dengan empati, gunakan bahasa yang mudah
+  dipahami orang awam, dan klasifikasikan tingkat urgensinya dengan hati-hati.
+  Kamu TIDAK BOLEH memberi diagnosis pasti atau merekomendasikan obat
+  spesifik — itu sepenuhnya wewenang dokter. Tugasmu hanya menyaring
+  dan mengarahkan, bukan mengobati.
+
+# -----------------------------------------------------------------------------
+# Graph alur kerja agent — di-parse jadi state machine oleh harness
+# -----------------------------------------------------------------------------
+flow:
+  entry_node: "terima_keluhan"
+
+  nodes:
+    - id: "terima_keluhan"
+      type: "llm_step"
+      instruction: >
+        Tanyakan dan rangkum keluhan pasien dengan bahasa yang mudah
+        dipahami. Jangan terburu-buru menyimpulkan sebelum keluhan
+        cukup jelas.
+      next: "klasifikasi_urgensi"
+
+    - id: "klasifikasi_urgensi"
+      type: "llm_step"
+      instruction: >
+        Berdasarkan rangkuman keluhan, klasifikasikan menjadi salah satu:
+        'ringan' (bisa ditangani saran mandiri) atau 'perlu_dokter'
+        (butuh pemeriksaan langsung). Jawab HANYA dengan salah satu
+        dari dua kata itu.
+      output_type: "classification"     # harness tahu harus parse jadi label, bukan teks bebas
+      branches:
+        ringan: "beri_saran_mandiri"
+        perlu_dokter: "cari_dokter"
+
+    - id: "cari_dokter"
+      type: "tool_call"
+      tool_ref: "mcp_hospital_doctor_search"
+      input_mapping:
+        keluhan: "{{terima_keluhan.output}}"   # hasil node sebelumnya jadi parameter tool
+      next: "jadwalkan_temu"
+
+    - id: "jadwalkan_temu"
+      type: "tool_call"
+      tool_ref: "mcp_calendar_booking"
+      input_mapping:
+        dokter_id: "{{cari_dokter.output.dokter_id}}"
+      next: "selesai"
+
+    - id: "beri_saran_mandiri"
+      type: "llm_step"
+      instruction: >
+        Beri saran penanganan mandiri yang aman dan umum, lalu sarankan
+        pasien untuk kontrol kembali jika kondisinya memburuk dalam 2-3 hari.
+      next: "selesai"
+
+    - id: "selesai"
+      type: "end"
+
+# -----------------------------------------------------------------------------
+# Tools MCP yang dibutuhkan graph di atas.
+# "connection_status: unconfigured" artinya UI Agent Studio HARUS memblokir
+# tombol Deploy sampai field ini diisi lewat wizard "hubungkan tool".
+# -----------------------------------------------------------------------------
+tools_required:
+  - tool_ref: "mcp_hospital_doctor_search"
+    purpose: "Mencari dokter yang sesuai dengan keluhan pasien"
+    connection_status: "unconfigured"
+    endpoint: null
+    auth_secret_ref: null        # nanti diisi path Parameter Store, mis:
+                                  # /agent-studio/bpjs-triase-rs-001/doctor-search-key
+
+  - tool_ref: "mcp_calendar_booking"
+    purpose: "Menjadwalkan pertemuan pasien dengan dokter"
+    connection_status: "unconfigured"
+    endpoint: null
+    auth_secret_ref: null        # mis: /agent-studio/bpjs-triase-rs-001/calendar-token
+
+# -----------------------------------------------------------------------------
+# Batas keamanan perilaku agent — divalidasi harness sebelum & selama eksekusi
+# -----------------------------------------------------------------------------
+guardrails:
+  max_turns: 15
+  disallowed_behaviors:
+    - "memberi diagnosis pasti tanpa dokter"
+    - "merekomendasikan obat spesifik"
+    - "mengabaikan keluhan yang mengindikasikan kondisi darurat"

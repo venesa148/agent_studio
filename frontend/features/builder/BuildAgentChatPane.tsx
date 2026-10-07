@@ -31,9 +31,10 @@ interface Message {
 interface BuildAgentChatPaneProps {
   activeAgent?: AgentSpecData | null;
   onAgentCreated?: (agentSpec: AgentSpecData) => void;
+  onClearActiveAgent?: () => void;
 }
 
-export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentChatPaneProps) {
+export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveAgent }: BuildAgentChatPaneProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isBuilding, setIsBuilding] = useState(false);
@@ -99,6 +100,8 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentCh
     );
   };
 
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!input.trim() || isBuilding) return;
@@ -127,7 +130,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentCh
     }));
 
     try {
-      const res = await fetch("http://localhost:8000/api/v1/builder/chat", {
+      const res = await fetch(`${apiUrl}/api/v1/builder/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -195,7 +198,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated }: BuildAgentCh
     setErrorMessage(null);
     setSaveSuccessMsg(null);
     try {
-      const res = await fetch("http://localhost:8000/api/v1/builder/save", {
+      const res = await fetch(`${apiUrl}/api/v1/builder/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(spec),
