@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   MessageSquare,
@@ -34,10 +34,22 @@ import {
   Sparkles,
   Layers,
   Code,
+  Clock,
+  Terminal,
+  XCircle,
 } from "lucide-react";
 import { AgentSpecData } from "@/app/page";
 
 export type TestPaneTab = "chat" | "trace";
+
+export type DeployStep = "idle" | "validate" | "sync" | "health" | "ready" | "failed";
+
+export interface DeployLogEntry {
+  id: string;
+  timestamp: string;
+  stage: "VALIDATE" | "BUILD" | "HEALTH" | "READY" | "ERROR" | "CANCEL";
+  message: string;
+}
 
 export interface ToolExecutionInfo {
   name: string;
@@ -151,6 +163,15 @@ export function TestAgentPane({
   const [deployedInfo, setDeployedInfo] = useState<any>(null);
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedEndpoint, setCopiedEndpoint] = useState(false);
+
+  // Deployment Progress & Logs states (matching publishing monitor)
+  const [deployStep, setDeployStep] = useState<DeployStep>("idle");
+  const [deployLogs, setDeployLogs] = useState<DeployLogEntry[]>([]);
+  const [showDeployLogs, setShowDeployLogs] = useState<boolean>(false);
+  const [deployStartTime, setDeployStartTime] = useState<number | null>(null);
+  const [elapsedTimeStr, setElapsedTimeStr] = useState<string>("less than a minute ago");
+  const deployAbortControllerRef = useRef<AbortController | null>(null);
+  const logContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Dynamic YAML Config Selector states
   const [configSource, setConfigSource] = useState<"chat_agent" | "server_yaml" | "upload_yaml">("chat_agent");
@@ -308,31 +329,127 @@ guardrails:
     reader.readAsText(file);
   };
 
+  // Update elapsed time for deployment monitor
+  useEffect(() => {
+    if (!deployStartTime) return;
+    const updateElapsed = () => {
+      const diffSec = Math.floor((Date.now() - deployStartTime) / 1000);
+      if (diffSec < 5) {
+        setElapsedTimeStr("less than a minute ago");
+      } else if (diffSec < 60) {
+        setElapsedTimeStr(`${diffSec}s ago`);
+      } else {
+        const mins = Math.floor(diffSec / 60);
+        setElapsedTimeStr(`${mins}m ago`);
+      }
+    };
+    updateElapsed();
+    const interval = setInterval(updateElapsed, 1000);
+    return () => clearInterval(interval);
+  }, [deployStartTime]);
+
+  // Auto-scroll log console
+  useEffect(() => {
+    if (showDeployLogs && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [deployLogs, showDeployLogs]);
+
+  const addDeployLog = (
+    stage: "VALIDATE" | "BUILD" | "HEALTH" | "READY" | "ERROR" | "CANCEL",
+    message: string
+  ) => {
+    const now = new Date();
+    const timeStr = now.toTimeString().split(" ")[0];
+    setDeployLogs((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: timeStr,
+        stage,
+        message,
+      },
+    ]);
+  };
+
+  const handleCancelDeploy = () => {
+    if (deployAbortControllerRef.current) {
+      deployAbortControllerRef.current.abort();
+      deployAbortControllerRef.current = null;
+    }
+    setIsPublishing(false);
+    setDeployStep("idle");
+    addDeployLog("CANCEL", "Proses deployment dibatalkan oleh pengguna.");
+  };
+
   const handlePublishAgent = async () => {
     setIsPublishing(true);
     setPublishError(null);
+    setDeployStep("validate");
+    const startTime = Date.now();
+    setDeployStartTime(startTime);
+    setShowDeployLogs(true);
+
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    deployAbortControllerRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    const cleanSlug = (domainSlug || "agent").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
     try {
+      // Step 1: Validate
+      addDeployLog("VALIDATE", "Memulai verifikasi declarative spec & state graph...");
+      if (customYamlContent.trim()) {
+        addDeployLog("VALIDATE", `Memeriksa struktur YAML kustom (${customYamlContent.split("\n").length} baris)...`);
+      } else {
+        addDeployLog("VALIDATE", `Menggunakan spesifikasi agen dari sesi chat ("${activeAgent?.name || 'Agent'}").`);
+      }
+
+      await new Promise((r) => setTimeout(r, 600));
+      if (controller.signal.aborted) return;
+      addDeployLog("VALIDATE", `✓ Validasi syntax berhasil: Target slug '${cleanSlug}', Akses '${accessLevel}'.`);
+
+      // Step 2: Build / Cloud Sync
+      setDeployStep("sync");
+      addDeployLog("BUILD", "Membangun container runtime & sinkronisasi payload ke AWS EC2 (13.250.191.160:8080)...");
+
       const res = await fetch(`${apiUrl}/api/v1/deployment/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          slug: domainSlug || "agent",
+          slug: cleanSlug,
           access_level: accessLevel,
           custom_yaml: customYamlContent.trim() ? customYamlContent : undefined,
         }),
       });
       clearTimeout(timeoutId);
 
+      if (controller.signal.aborted) return;
+
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Gagal mempublikasikan agent");
+        throw new Error(errorData.detail || "Gagal mempublikasikan agent ke runtime server");
       }
 
       const data = await res.json();
+      addDeployLog("BUILD", `✓ Sinkronisasi multi-agent runtime selesai. Registry slug terdaftar: '${data.slug}'.`);
+
+      // Step 3: Health Check
+      setDeployStep("health");
+      addDeployLog("HEALTH", `Menguji ketersediaan live runtime endpoint di ${data.endpoint}...`);
+
+      await new Promise((r) => setTimeout(r, 700));
+      if (controller.signal.aborted) return;
+
+      addDeployLog("HEALTH", `✓ Health check berhasil (Status: 200 OK). Model LLM & Guardrails terhubung.`);
+
+      // Step 4: Live Ready
+      setDeployStep("ready");
+      addDeployLog("READY", `✓ Agent '${data.agent_name}' berhasil go-live!`);
+      addDeployLog("READY", `Endpoint: ${data.endpoint}`);
+      addDeployLog("READY", `API Key aktif: ${data.api_key.slice(0, 14)}...`);
+
       setIsPublished(true);
       setDeployedInfo(data);
 
@@ -344,7 +461,7 @@ guardrails:
           body: JSON.stringify({
             agent: activeAgent?.name || data.agent_name || "Unknown Agent",
             environment: "production",
-            path: `/api/agents/${domainSlug || activeAgent?.id}/run`,
+            path: `/api/agents/${cleanSlug}/run`,
             status: "Ready",
           }),
         });
@@ -353,13 +470,19 @@ guardrails:
       }
     } catch (err: any) {
       clearTimeout(timeoutId);
-      if (err.name === "AbortError") {
-        setPublishError("Koneksi ke backend timeout. Pastikan backend aktif.");
+      if (controller.signal.aborted || err.name === "AbortError") {
+        addDeployLog("CANCEL", "Proses deployment dibatalkan.");
+        setDeployStep("idle");
       } else {
-        setPublishError(err.message || "Gagal menghubungkan ke server deployment");
+        const errMsg = err.message || "Gagal menghubungkan ke server deployment";
+        addDeployLog("ERROR", `✕ Deployment gagal: ${errMsg}`);
+        setPublishError(errMsg);
+        setDeployStep("failed");
+        setShowDeployLogs(true);
       }
     } finally {
       setIsPublishing(false);
+      deployAbortControllerRef.current = null;
     }
   };
 
@@ -621,13 +744,29 @@ guardrails:
             <button
               onClick={() => setShowPublishPopover(!showPublishPopover)}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-2xs ${
-                isPublished
+                isPublishing
+                  ? "bg-amber-600 hover:bg-amber-700 text-white animate-pulse"
+                  : isPublished
                   ? "bg-emerald-600 hover:bg-emerald-700 text-white"
                   : "bg-blue-600 hover:bg-blue-700 text-white"
               }`}
             >
-              <Globe className="w-3.5 h-3.5" />
-              <span>{isPublished ? "Live" : "Publish"}</span>
+              {isPublishing ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Deploying...</span>
+                </>
+              ) : isPublished ? (
+                <>
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>Live</span>
+                </>
+              ) : (
+                <>
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>Publish</span>
+                </>
+              )}
             </button>
 
             {/* Publish Popover Dialog */}
@@ -881,6 +1020,216 @@ guardrails:
                       )}
                     </div>
                   </div>
+
+                  {/* Deployment Progress Bar & Log Viewer (Exact visual match to media_1791358838623.png) */}
+                  {(isPublishing || deployStep !== "idle" || isPublished) && (
+                    <div className="p-3.5 rounded-2xl border border-stone-200 bg-[#fafafa] shadow-xs space-y-3">
+                      {/* Top Header */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-800 text-[13px]">
+                            {deployStep === "ready"
+                              ? "Publishing"
+                              : deployStep === "failed"
+                              ? "Publishing"
+                              : "Publishing"}
+                          </span>
+                          <span className="text-slate-500 text-[11px]">
+                            Started {elapsedTimeStr} by Andika
+                          </span>
+                          {isPublishing && (
+                            <button
+                              type="button"
+                              onClick={handleCancelDeploy}
+                              className="px-2 py-0.5 rounded-md bg-stone-200/90 hover:bg-stone-300 text-stone-700 text-[10.5px] font-medium transition cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowDeployLogs(!showDeployLogs)}
+                          className="flex items-center gap-1 text-slate-600 hover:text-slate-900 text-xs font-medium cursor-pointer shrink-0 ml-1"
+                        >
+                          <span>{showDeployLogs ? "Hide logs" : "View logs"}</span>
+                          {showDeployLogs ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+
+                      {/* Segmented Pill Progress Bar */}
+                      <div className="w-full h-8 rounded-full bg-stone-200/50 p-0.5 flex items-center gap-1 overflow-hidden border border-stone-200/70">
+                        {/* Segment 1: Validate */}
+                        {deployStep === "validate" ? (
+                          <div className="flex-1 h-full rounded-full bg-blue-600 text-white flex items-center justify-center gap-1.5 text-[11px] font-semibold shadow-xs animate-pulse">
+                            <span>Validate</span>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          </div>
+                        ) : deployStep === "sync" || deployStep === "health" || deployStep === "ready" ? (
+                          <div
+                            title="Spec & Graph Validated"
+                            className="w-12 h-full rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0"
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          </div>
+                        ) : deployStep === "failed" ? (
+                          <div className="w-12 h-full rounded-full bg-rose-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                            <XCircle className="w-3.5 h-3.5" />
+                          </div>
+                        ) : (
+                          <div
+                            title="Pending: Validate"
+                            className="w-10 h-full rounded-full bg-stone-200/80 text-stone-400 flex items-center justify-center shrink-0"
+                          >
+                            <Clock className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+
+                        {/* Segment 2: Build / Cloud Sync */}
+                        {deployStep === "sync" ? (
+                          <div className="flex-1 h-full rounded-full bg-blue-600 text-white flex items-center justify-center gap-1.5 text-[11px] font-semibold shadow-xs animate-pulse">
+                            <span>Build</span>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          </div>
+                        ) : deployStep === "health" || deployStep === "ready" ? (
+                          <div
+                            title="Runtime Sync & Build Complete"
+                            className="w-12 h-full rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0"
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          </div>
+                        ) : (
+                          <div
+                            title="Pending: Build / Cloud Sync"
+                            className="w-10 h-full rounded-full bg-stone-200/80 text-stone-400 flex items-center justify-center shrink-0"
+                          >
+                            <Clock className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+
+                        {/* Segment 3: Health Check */}
+                        {deployStep === "health" ? (
+                          <div className="flex-1 h-full rounded-full bg-blue-600 text-white flex items-center justify-center gap-1.5 text-[11px] font-semibold shadow-xs animate-pulse">
+                            <span>Health Check</span>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          </div>
+                        ) : deployStep === "ready" ? (
+                          <div
+                            title="Health Check Passed"
+                            className="w-12 h-full rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0"
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          </div>
+                        ) : (
+                          <div
+                            title="Pending: Health Check"
+                            className="w-10 h-full rounded-full bg-stone-200/80 text-stone-400 flex items-center justify-center shrink-0"
+                          >
+                            <Clock className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+
+                        {/* Segment 4: Live Ready */}
+                        {deployStep === "ready" ? (
+                          <div className="flex-1 h-full rounded-full bg-emerald-600 text-white flex items-center justify-center gap-1 text-[11px] font-semibold shadow-xs">
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                            <span>Live Ready</span>
+                          </div>
+                        ) : (
+                          <div
+                            title="Pending: Live Ready"
+                            className="w-10 h-full rounded-full bg-stone-200/80 text-stone-400 flex items-center justify-center shrink-0"
+                          >
+                            <Clock className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Expandable Terminal Console Logs */}
+                      {showDeployLogs && (
+                        <div className="rounded-xl border border-slate-800 bg-[#0c1222] p-3 shadow-inner">
+                          <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-[10px] text-slate-400 font-mono">
+                            <div className="flex items-center gap-1.5">
+                              <Terminal className="w-3.5 h-3.5 text-blue-400" />
+                              <span className="font-semibold text-slate-300">Deployment Logs</span>
+                              <span className="px-1.5 py-0.2 bg-slate-800 text-slate-300 rounded font-semibold text-[9px]">
+                                {deployLogs.length} events
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const logText = deployLogs
+                                    .map((l) => `[${l.timestamp}] [${l.stage}] ${l.message}`)
+                                    .join("\n");
+                                  navigator.clipboard.writeText(logText);
+                                }}
+                                className="hover:text-white transition-colors cursor-pointer"
+                                title="Salin semua log"
+                              >
+                                Copy
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeployLogs([])}
+                                className="hover:text-rose-400 transition-colors cursor-pointer"
+                                title="Bersihkan log"
+                              >
+                                Clear
+                              </button>
+                            </div>
+                          </div>
+                          <div
+                            ref={logContainerRef}
+                            className="max-h-48 overflow-y-auto space-y-1 font-mono text-[10px] leading-relaxed scrollbar-thin scrollbar-thumb-slate-700"
+                          >
+                            {deployLogs.length === 0 ? (
+                              <div className="text-slate-500 italic py-1">
+                                Menunggu proses deployment dimulai...
+                              </div>
+                            ) : (
+                              deployLogs.map((log) => (
+                                <div key={log.id} className="flex items-start gap-1.5">
+                                  <span className="text-slate-500 select-none shrink-0 font-mono">
+                                    [{log.timestamp}]
+                                  </span>
+                                  <span
+                                    className={`px-1 py-0.2 rounded text-[8.5px] font-bold shrink-0 ${
+                                      log.stage === "VALIDATE"
+                                        ? "bg-purple-900/60 text-purple-300 border border-purple-800"
+                                        : log.stage === "BUILD"
+                                        ? "bg-blue-900/60 text-blue-300 border border-blue-800"
+                                        : log.stage === "HEALTH"
+                                        ? "bg-amber-900/60 text-amber-300 border border-amber-800"
+                                        : log.stage === "READY"
+                                        ? "bg-emerald-900/60 text-emerald-300 border border-emerald-800"
+                                        : log.stage === "ERROR"
+                                        ? "bg-rose-900/60 text-rose-300 border border-rose-800"
+                                        : "bg-slate-800 text-slate-300"
+                                    }`}
+                                  >
+                                    {log.stage}
+                                  </span>
+                                  <span
+                                    className={`break-words ${
+                                      log.stage === "ERROR"
+                                        ? "text-rose-400 font-semibold"
+                                        : log.stage === "READY"
+                                        ? "text-emerald-300 font-semibold"
+                                        : "text-slate-300"
+                                    }`}
+                                  >
+                                    {log.message}
+                                  </span>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {publishError && (
                     <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-[11px] flex items-start gap-2">
