@@ -28,7 +28,12 @@ class BuilderService:
             if lowered.startswith(prefix):
                 cleaned = cleaned[len(prefix):].strip()
                 break
-        return cleaned[:255].title() if cleaned else "Custom AI Assistant"
+        if not cleaned:
+            return "Custom AI Assistant"
+        name = cleaned[:255].title()
+        for acr in ["BPJS", "CS", "AI", "API", "IT", "RS", "IGD", "FKTP"]:
+            name = re.sub(rf"\b{acr.capitalize()}\b", acr, name)
+        return name
 
     @staticmethod
     async def _select_tools_from_db(db: AsyncSession, prompt: str) -> List[str]:
@@ -196,7 +201,12 @@ class BuilderService:
                     match = re.search(r"({.*})", content, re.DOTALL)
                     
                 if match:
-                    parsed = json.loads(match.group(1))
+                    raw_json = match.group(1).strip()
+                    try:
+                        parsed = json.loads(raw_json, strict=False)
+                    except json.JSONDecodeError:
+                        cleaned_json = re.sub(r'\\(?![/u"bfnrt])', r'\\\\', raw_json)
+                        parsed = json.loads(cleaned_json, strict=False)
                     message = parsed.get("message", "Saya telah memproses permintaan Anda.")
                     spec_updated = parsed.get("spec_updated", False)
                     should_commit = parsed.get("should_commit", False)

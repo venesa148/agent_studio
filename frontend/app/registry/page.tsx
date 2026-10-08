@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/navigation/Sidebar";
 import { RegisterMcpModal } from "@/features/tools/RegisterMcpModal";
 import { ImportOpenApiModal } from "@/features/tools/ImportOpenApiModal";
 import { EditToolModal } from "@/features/tools/EditToolModal";
+import { EditMcpModal } from "@/features/tools/EditMcpModal";
 import { CustomToolModal } from "@/features/tools/CustomToolModal";
 import {
   Plus,
@@ -30,6 +31,8 @@ export default function ToolsRegistryPage() {
   const [showCustomToolModal, setShowCustomToolModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingTool, setEditingTool] = useState<any | null>(null);
+  const [showEditMcpModal, setShowEditMcpModal] = useState(false);
+  const [editingMcpServer, setEditingMcpServer] = useState<any | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Unified tables state
@@ -118,7 +121,10 @@ export default function ToolsRegistryPage() {
     setActiveTab("all_tools");
   };
 
-  const handleUpdateTool = async (toolId: string, updatedData: { name: string; description: string }) => {
+  const handleUpdateTool = async (
+    toolId: string,
+    updatedData: { name: string; description: string; apiUrl?: string; input_schema?: any }
+  ) => {
     const res = await fetch(`${API_URL}/tools/${toolId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -127,6 +133,17 @@ export default function ToolsRegistryPage() {
     if (!res.ok) throw new Error(await readError(res));
     const updatedTool = await res.json();
     setTools((prev) => prev.map((t) => (t.id === toolId ? updatedTool : t)));
+  };
+
+  const handleUpdateMcpServer = async (serverId: string, updatedData: { name: string; url: string }) => {
+    const res = await fetch(`${API_URL}/mcp/${serverId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedData),
+    });
+    if (!res.ok) throw new Error(await readError(res));
+    const updatedServer = await res.json();
+    setMcpServers((prev) => prev.map((s) => (s.id === serverId ? updatedServer : s)));
   };
 
   const handleDeleteTool = async (toolId: string, toolName: string) => {
@@ -475,15 +492,28 @@ export default function ToolsRegistryPage() {
                             {server.created_at ? new Date(server.created_at).toLocaleDateString() : "-"}
                           </td>
                           <td className="py-3.5 px-4 text-right">
-                            <button
-                              type="button"
-                              title="Hapus MCP Server"
-                              disabled={deletingId === server.id}
-                              onClick={() => handleDeleteMcpServer(server.id, server.name)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50 transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                title="Edit MCP Server"
+                                onClick={() => {
+                                  setEditingMcpServer(server);
+                                  setShowEditMcpModal(true);
+                                }}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Hapus MCP Server"
+                                disabled={deletingId === server.id}
+                                onClick={() => handleDeleteMcpServer(server.id, server.name)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50 transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -526,6 +556,17 @@ export default function ToolsRegistryPage() {
           setEditingTool(null);
         }}
         onSaveTool={handleUpdateTool}
+      />
+
+      {/* 7. Modal 5: Edit MCP Server */}
+      <EditMcpModal
+        isOpen={showEditMcpModal}
+        server={editingMcpServer}
+        onClose={() => {
+          setShowEditMcpModal(false);
+          setEditingMcpServer(null);
+        }}
+        onSaveServer={handleUpdateMcpServer}
       />
     </div>
   );

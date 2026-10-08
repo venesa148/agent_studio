@@ -150,7 +150,7 @@ async def delete_mcp_server(server_id: str, db: AsyncSession = Depends(get_db)):
     return None
 
 @router.post("/local-server")
-async def local_mcp_server_handler(request: Request):
+async def local_mcp_server_handler(request: Request, db: AsyncSession = Depends(get_db)):
     """
     Standar Model Context Protocol (MCP) JSON-RPC 2.0 Server Lokal.
     Menyediakan tools bawaan yang dapat langsung dihubungkan oleh MCP Client.
@@ -210,6 +210,114 @@ async def local_mcp_server_handler(request: Request):
                                 }
                             },
                             "required": ["amount", "from_currency"]
+                        }
+                    },
+                    {
+                        "name": "classify_complaint",
+                        "description": "Clinical Triage Protocol: Mengategorikan keluhan (EMERGENCY, NEED_FURTHER_CARE, INFORMATION_ONLY) dan memetakan poli/layanan kandidat",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "complaint": {
+                                    "type": "string",
+                                    "description": "Keluhan atau gejala kesehatan yang dirasakan pasien"
+                                }
+                            },
+                            "required": ["complaint"]
+                        }
+                    },
+                    {
+                        "name": "get_participant_status",
+                        "description": "Mengecek keaktifan status kepesertaan JKN/BPJS dan kelayakan administrasi layanan",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "participant_id": {
+                                    "type": "string",
+                                    "description": "Nomor kartu BPJS atau NIK peserta"
+                                }
+                            },
+                            "required": ["participant_id"]
+                        }
+                    },
+                    {
+                        "name": "search_hospitals",
+                        "description": "Mencari fasilitas rumah sakit rekanan BPJS berdasarkan kota dan layanan poli via Web API",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "city": {
+                                    "type": "string",
+                                    "description": "Kota atau wilayah fasilitas kesehatan"
+                                },
+                                "service": {
+                                    "type": "string",
+                                    "description": "Layanan atau poli yang dicari (contoh: Orthopaedi)"
+                                }
+                            },
+                            "required": ["city"]
+                        }
+                    },
+                    {
+                        "name": "search_doctors",
+                        "description": "Mencari dokter spesialis dan ketersediaan jadwal praktik di rumah sakit via Web API",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "hospital_name": {
+                                    "type": "string",
+                                    "description": "Nama rumah sakit tujuan"
+                                },
+                                "specialty": {
+                                    "type": "string",
+                                    "description": "Spesialisasi atau poli dokter"
+                                }
+                            },
+                            "required": ["hospital_name", "specialty"]
+                        }
+                    },
+                    {
+                        "name": "create_appointment",
+                        "description": "Membuat janji temu / booking antrean faskes BPJS setelah konfirmasi eksplisit pasien via Web API",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "patient_name": {
+                                    "type": "string",
+                                    "description": "Nama lengkap pasien"
+                                },
+                                "hospital_name": {
+                                    "type": "string",
+                                    "description": "Nama rumah sakit tujuan"
+                                },
+                                "doctor_name": {
+                                    "type": "string",
+                                    "description": "Nama dokter yang dipilih"
+                                },
+                                "date": {
+                                    "type": "string",
+                                    "description": "Tanggal appointment (YYYY-MM-DD)"
+                                },
+                                "time_slot": {
+                                    "type": "string",
+                                    "description": "Slot jam janji temu"
+                                }
+                            },
+                            "required": ["patient_name", "hospital_name", "doctor_name", "date"]
+                        }
+                    },
+                    {
+                        "name": "get_appointment",
+                        "description": "Melihat detail status tiket janji temu dan nomor antrean yang telah dibuat via Web API",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "booking_id": {
+                                    "type": "string",
+                                    "description": "Nomor booking atau kode tiket antrean"
+                                }
+                            },
+                            "required": ["booking_id"]
                         }
                     }
                 ]
@@ -287,6 +395,26 @@ async def local_mcp_server_handler(request: Request):
                         "result": converted,
                         "rate": rate_from / rate_to
                     }
+                }
+            }
+
+        elif tool_name in ["classify_complaint", "get_participant_status", "search_hospitals", "search_doctors", "create_appointment", "get_appointment", "get_referral_status"]:
+            from app.services.tool_registry import ToolRegistryService
+            import json
+            tool_output = await ToolRegistryService._execute_builtin_tool(tool_name, tool_args, db=db)
+            if isinstance(tool_output, dict) and tool_output.get("status") == "error":
+                res_text = tool_output.get("message", f"Error pada tool '{tool_name}'")
+            elif isinstance(tool_output, dict):
+                res_text = tool_output.get("message") or json.dumps(tool_output, ensure_ascii=False)
+            else:
+                res_text = str(tool_output)
+
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [{"type": "text", "text": res_text}],
+                    "data": tool_output if isinstance(tool_output, dict) else {"output": tool_output}
                 }
             }
 
