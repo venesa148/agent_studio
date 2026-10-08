@@ -129,7 +129,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
           if (typeof window !== "undefined") {
             try {
               localStorage.setItem(getStorageKey(activeAgent.id), JSON.stringify(initialMsgs));
-            } catch {}
+            } catch { }
           }
         }
         setInput("");
@@ -252,7 +252,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
     if (typeof window !== "undefined") {
       try {
         localStorage.removeItem(getStorageKey(currentAgentIdRef.current));
-      } catch {}
+      } catch { }
     }
     setMessages([]);
     setInput("");
@@ -287,7 +287,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
       }
 
       const savedSpec: AgentSpecData = await res.json();
-      
+
       // Update local message status tanpa menghapus riwayat chat
       const updatedMessages = messages.map((m) =>
         m.spec ? { ...m, spec: savedSpec, is_draft: false } : m
@@ -297,13 +297,13 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
       if (typeof window !== "undefined") {
         try {
           localStorage.setItem(getStorageKey(savedSpec.id), JSON.stringify(updatedMessages));
-        } catch {}
+        } catch { }
       }
 
       skipClearRef.current = true;
       currentAgentIdRef.current = savedSpec.id;
       onAgentCreated?.(savedSpec);
-      
+
       setTimeout(() => {
         skipClearRef.current = false;
       }, 1000);
@@ -426,9 +426,8 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
             {messages.map((msg) => (
               <div key={msg.id} className="space-y-2">
                 <div
-                  className={`flex gap-3 ${
-                    msg.sender === "user" ? "justify-end" : "justify-start"
-                  }`}
+                  className={`flex gap-3 ${msg.sender === "user" ? "justify-end" : "justify-start"
+                    }`}
                 >
                   {msg.sender === "builder" && (
                     <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0 text-xs shadow-2xs">
@@ -437,11 +436,10 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
                   )}
 
                   <div
-                    className={`max-w-[85%] rounded-2xl p-3.5 text-xs leading-relaxed shadow-2xs ${
-                      msg.sender === "user"
+                    className={`max-w-[85%] rounded-2xl p-3.5 text-xs leading-relaxed shadow-2xs ${msg.sender === "user"
                         ? "bg-blue-600 text-white rounded-br-xs"
                         : "bg-slate-50 border border-slate-200/80 text-slate-800 rounded-bl-xs"
-                    }`}
+                      }`}
                   >
                     <p className="whitespace-pre-line">{msg.text}</p>
                   </div>
@@ -539,22 +537,34 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
 
                           <div className="flex flex-wrap gap-1 mt-1.5">
                             {msg.spec.tools && msg.spec.tools.length > 0 ? (
-                              msg.spec.tools.map((tool) => (
-                                <span
-                                  key={tool}
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200/60 font-mono text-[11px]"
-                                >
-                                  <span>{tool}()</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleTool(msg.id, tool)}
-                                    className="text-blue-400 hover:text-rose-600 font-bold ml-0.5 cursor-pointer"
-                                    title="Hapus tool ini dari agent"
+                              msg.spec.tools.map((tool) => {
+                                const toolObj = dbTools.find((t) => t.name === tool);
+                                const isMcp = toolObj?.source_type === "mcp";
+                                return (
+                                  <span
+                                    key={tool}
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-mono text-[11px] ${
+                                      isMcp
+                                        ? "bg-purple-50 text-purple-700 border-purple-200"
+                                        : "bg-blue-50 text-blue-700 border-blue-200/60"
+                                    }`}
+                                    title={toolObj?.description || tool}
                                   >
-                                    ✕
-                                  </button>
-                                </span>
-                              ))
+                                    <span className="text-[8px] uppercase px-1 py-0.2 rounded bg-black/5 font-sans font-bold">
+                                      {toolObj?.source_type || "tool"}
+                                    </span>
+                                    <span>{tool}()</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleTool(msg.id, tool)}
+                                      className="text-slate-400 hover:text-rose-600 font-bold ml-0.5 cursor-pointer"
+                                      title="Hapus tool ini dari agent"
+                                    >
+                                      ✕
+                                    </button>
+                                  </span>
+                                );
+                              })
                             ) : (
                               <span className="text-slate-400 text-[11px] italic">
                                 Belum ada tool dipilih dari database.
@@ -571,20 +581,24 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
                               <div className="flex flex-wrap gap-1">
                                 {dbTools.map((dbTool) => {
                                   const isSelected = msg.spec?.tools?.includes(dbTool.name);
+                                  const isMcp = dbTool.source_type === "mcp";
                                   return (
                                     <button
                                       key={dbTool.id || dbTool.name}
                                       type="button"
                                       onClick={() => handleToggleTool(msg.id, dbTool.name)}
-                                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-all cursor-pointer ${
+                                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-all cursor-pointer flex items-center gap-1 ${
                                         isSelected
-                                          ? "bg-blue-600 text-white border-blue-600 font-semibold shadow-2xs"
+                                          ? isMcp
+                                            ? "bg-purple-600 text-white border-purple-600 font-semibold shadow-2xs"
+                                            : "bg-blue-600 text-white border-blue-600 font-semibold shadow-2xs"
                                           : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
                                       }`}
                                       title={dbTool.description || dbTool.name}
                                     >
-                                      {isSelected ? "✓ " : "+ "}
-                                      {dbTool.name}
+                                      <span>{isSelected ? "✓" : "+"}</span>
+                                      {isMcp && <span className="text-[8px] px-1 rounded bg-black/10 uppercase">MCP</span>}
+                                      <span>{dbTool.name}</span>
                                     </button>
                                   );
                                 })}
@@ -639,18 +653,17 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
                             <button
                               type="button"
                               onClick={() => handleSaveSpec(msg.spec!)}
-                              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-white text-xs font-medium transition-all shadow-2xs cursor-pointer ${
-                                msg.spec.id && !msg.is_draft
+                              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-white text-xs font-medium transition-all shadow-2xs cursor-pointer ${msg.spec.id && !msg.is_draft
                                   ? "bg-slate-700 hover:bg-slate-800"
                                   : "bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300 ring-offset-1 font-semibold"
-                              }`}
+                                }`}
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
                               {msg.spec.id && !msg.is_draft
                                 ? "Simpan Perubahan"
                                 : msg.spec.id
-                                ? "✅ Terapkan Perubahan ke DB"
-                                : "✅ Terapkan & Simpan ke DB"}
+                                  ? "✅ Terapkan Perubahan ke DB"
+                                  : "✅ Terapkan & Simpan ke DB"}
                             </button>
                           </div>
                         </div>

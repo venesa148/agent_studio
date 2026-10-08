@@ -89,6 +89,32 @@ DEFAULT_BUILTIN_SCHEMAS: Dict[str, Dict[str, Any]] = {
             }
         },
         "required": ["query"]
+    },
+    "calculator": {
+        "type": "object",
+        "properties": {
+            "expression": {
+                "type": "string",
+                "description": "Ekspresi matematika yang ingin dihitung, contoh: '25 * 4', '150000 * 0.11', '(12 + 8) / 2'"
+            }
+        },
+        "required": ["expression"]
+    },
+    "api_fetch": {
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "URL endpoint REST API publik yang ingin di-request"
+            },
+            "method": {
+                "type": "string",
+                "enum": ["GET", "POST"],
+                "description": "HTTP method yang digunakan (GET atau POST)",
+                "default": "GET"
+            }
+        },
+        "required": ["url"]
     }
 }
 
@@ -270,7 +296,8 @@ class AgentService:
             "1. Berikan HANYA jawaban akhir langsung kepada pengguna dalam Bahasa Indonesia yang ramah dan alami.\n"
             "2. DILARANG KERAS menampilkan proses berpikir, monolog batin, analisis pertanyaan, atau teks acak dalam bahasa apapun.\n"
             "3. Selalu perhatikan dan ingat seluruh konteks percakapan sebelumnya secara utuh.\n"
-            "4. Jika pengguna menanyakan data yang memerlukan tools yang terdaftar (misal status BPJS, rumah sakit, rujukan), GUNAKAN tool yang tersedia dan jangan mengarang data!"
+            "4. Jika pengguna menanyakan data yang memerlukan tools yang terdaftar, GUNAKAN tool yang tersedia dan jangan mengarang data!\n"
+            "5. Jika hasil tool mengindikasikan status error atau layanan tidak dapat dihubungi, jelaskan dengan jujur kepada pengguna bahwa sistem/server sumber data sedang mengalami gangguan atau offline, dan jangan membuat data fiktif!"
         )
 
         # ======================================================================
@@ -457,19 +484,29 @@ class AgentService:
                     tool_result = {"status": "error", "message": f"Eksekusi tool '{fn_name}' gagal: {str(err)}"}
                     duration_ms = 0
 
-                # Deteksi target endpoint live API teman
-                api_base = (getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "https://sisters-given-cloud-nerve.trycloudflare.com")).rstrip("/")
+                # Deteksi target endpoint live API
+                api_base = (getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "")).rstrip("/")
                 endpoint_url = {
-                    "check_bpjs": f"{api_base}/api/v1/mock-bpjs/check-bpjs",
-                    "get_referral_status": f"{api_base}/api/v1/mock-bpjs/referral-status",
-                    "search_hospital": f"{api_base}/api/v1/mock-bpjs/hospitals",
-                    "hospital_finder": f"{api_base}/api/v1/mock-bpjs/hospitals",
-                    "find_specialist": f"{api_base}/api/v1/mock-bpjs/specialists",
-                    "search_web": f"{api_base}/api/v1/mock-bpjs/search-web",
-                }.get(fn_name, f"{api_base}/api/v1/mock-bpjs/{fn_name}")
+                    "check_bpjs": f"{api_base}/api/v1/mock-bpjs/check-bpjs" if api_base else None,
+                    "get_referral_status": f"{api_base}/api/v1/mock-bpjs/referral-status" if api_base else None,
+                    "search_hospital": f"{api_base}/api/v1/mock-bpjs/hospitals" if api_base else None,
+                    "hospital_finder": f"{api_base}/api/v1/mock-bpjs/hospitals" if api_base else None,
+                    "find_specialist": f"{api_base}/api/v1/mock-bpjs/specialists" if api_base else None,
+                }.get(fn_name)
 
-                if isinstance(tool_result, dict) and tool_result.get("_endpoint"):
-                    endpoint_url = tool_result.get("_endpoint")
+                source_name = "Local Service"
+                if isinstance(tool_result, dict):
+                    if tool_result.get("_endpoint"):
+                        endpoint_url = tool_result.get("_endpoint")
+                    if tool_result.get("_source"):
+                        source_name = tool_result.get("_source")
+                    elif endpoint_url:
+                        source_name = "External Service API"
+
+                is_tool_error = False
+                if isinstance(tool_result, dict):
+                    if tool_result.get("status") in ["error", "ERROR"] or tool_result.get("error"):
+                        is_tool_error = True
 
                 # Rekam ke trace steps untuk observabilitas UI
                 trace_steps.append({
@@ -478,13 +515,13 @@ class AgentService:
                     "title": f"Call Tool: {fn_name}",
                     "type": "tool_calling",
                     "tool_name": fn_name,
-                    "endpoint": endpoint_url,
-                    "source": "Live Cloudflare Web API Teman (MySQL)",
+                    "endpoint": endpoint_url or f"internal://tools/{fn_name}",
+                    "source": source_name,
                     "params": fn_args,
                     "result": tool_result,
                     "detail": f"{fn_name}({json.dumps(fn_args, ensure_ascii=False)})",
                     "duration_ms": duration_ms,
-                    "status": "ok" if not isinstance(tool_result, dict) or tool_result.get("status") != "error" else "error"
+                    "status": "error" if is_tool_error else "ok"
                 })
 
                 # Masukkan hasil tool kembali ke konteks LLM
@@ -518,6 +555,12 @@ class AgentService:
 
         if escalation_reasons:
             final_status = "escalated"
+            agent_lower_name = (db_agent.name or "").lower()
+            if "bpjs" in agent_lower_name or "kesehatan" in agent_lower_name:
+                escalation_dest = "BPJS Care Center 165 / Petugas Faskes Terkait"
+            else:
+                escalation_dest = f"Tim Dukungan Layanan ({db_agent.name}) / Operator Manusia"
+
             trace_steps.append({
                 "step": len(trace_steps) + 1,
                 "step_no": len(trace_steps) + 1,
@@ -527,7 +570,7 @@ class AgentService:
                 "params": {"triggers": escalation_reasons},
                 "result": {
                     "action": "ESCALATED",
-                    "destination": "BPJS Care Center 165 / Human Agent Specialist",
+                    "destination": escalation_dest,
                     "reason": "; ".join(escalation_reasons)
                 },
                 "detail": f"Kasus dialihkan ke antrean petugas manusia oleh Harness Post-Check: {'; '.join(escalation_reasons)}",

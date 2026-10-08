@@ -34,6 +34,19 @@ async def builder_save(payload: AgentSpec, db: AsyncSession = Depends(get_db)):
     Menyimpan atau memperbarui Spesifikasi Agent ke database.
     """
     try:
+        # Auto-resolve mcp_servers from tools if not provided
+        mcp_servers = payload.mcp_servers or []
+        if payload.tools and not mcp_servers:
+            from app.models.tool import ToolModel
+            from sqlalchemy import select
+            t_query = await db.execute(
+                select(ToolModel.mcp_server_id).where(
+                    ToolModel.name.in_(payload.tools),
+                    ToolModel.mcp_server_id.isnot(None)
+                )
+            )
+            mcp_servers = list(set([r[0] for r in t_query.fetchall() if r[0]]))
+
         if payload.id:
             db_agent = await AgentService.update_agent(db, payload.id, AgentSpecUpdate(
                 name=payload.name,
@@ -41,7 +54,7 @@ async def builder_save(payload: AgentSpec, db: AsyncSession = Depends(get_db)):
                 instructions=payload.instructions,
                 model=payload.model,
                 tools=payload.tools,
-                mcp_servers=payload.mcp_servers,
+                mcp_servers=mcp_servers,
                 harness=payload.harness,
                 status=payload.status
             ))
@@ -53,7 +66,7 @@ async def builder_save(payload: AgentSpec, db: AsyncSession = Depends(get_db)):
                     instructions=payload.instructions,
                     model=payload.model,
                     tools=payload.tools,
-                    mcp_servers=payload.mcp_servers,
+                    mcp_servers=mcp_servers,
                     harness=payload.harness,
                     status=payload.status
                 )
@@ -65,7 +78,7 @@ async def builder_save(payload: AgentSpec, db: AsyncSession = Depends(get_db)):
                 instructions=payload.instructions,
                 model=payload.model,
                 tools=payload.tools,
-                mcp_servers=payload.mcp_servers,
+                mcp_servers=mcp_servers,
                 harness=payload.harness,
                 status=payload.status
             )

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
@@ -148,3 +148,163 @@ async def delete_mcp_server(server_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(server)
     await db.commit()
     return None
+
+@router.post("/local-server")
+async def local_mcp_server_handler(request: Request):
+    """
+    Standar Model Context Protocol (MCP) JSON-RPC 2.0 Server Lokal.
+    Menyediakan tools bawaan yang dapat langsung dihubungkan oleh MCP Client.
+    """
+    body = await request.json()
+    req_id = body.get("id", 1)
+    method = body.get("method", "")
+    params = body.get("params", {})
+
+    if method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "tools": [
+                    {
+                        "name": "system_time",
+                        "description": "Mendapatkan waktu, tanggal, dan zona waktu server saat ini",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "timezone": {
+                                    "type": "string",
+                                    "description": "Zona waktu target (contoh: WIB, UTC, Asia/Jakarta)",
+                                    "default": "Asia/Jakarta"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "name": "system_diagnostics",
+                        "description": "Mendapatkan informasi status sistem, OS, Python version, dan platform runtime",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {}
+                        }
+                    },
+                    {
+                        "name": "currency_converter",
+                        "description": "Konversi nilai mata uang asing (USD, EUR, SGD, JPY, MYR) ke Rupiah (IDR)",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "amount": {
+                                    "type": "number",
+                                    "description": "Jumlah nominal uang yang ingin dikonversi"
+                                },
+                                "from_currency": {
+                                    "type": "string",
+                                    "description": "Kode mata uang asal (USD, EUR, SGD, JPY, MYR)",
+                                    "default": "USD"
+                                },
+                                "to_currency": {
+                                    "type": "string",
+                                    "description": "Kode mata uang tujuan (default IDR)",
+                                    "default": "IDR"
+                                }
+                            },
+                            "required": ["amount", "from_currency"]
+                        }
+                    }
+                ]
+            }
+        }
+
+    elif method == "tools/call":
+        tool_name = params.get("name", "")
+        tool_args = params.get("arguments", {})
+
+        if tool_name == "system_time":
+            from datetime import datetime
+            now = datetime.now()
+            res_text = f"Waktu server saat ini: {now.strftime('%Y-%m-%d %H:%M:%S')} (WIB/Local Server Time)"
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [{"type": "text", "text": res_text}],
+                    "data": {
+                        "date": now.strftime("%Y-%m-%d"),
+                        "time": now.strftime("%H:%M:%S"),
+                        "timestamp": now.isoformat()
+                    }
+                }
+            }
+
+        elif tool_name == "system_diagnostics":
+            import platform
+            import sys
+            diag = {
+                "os": platform.system(),
+                "release": platform.release(),
+                "machine": platform.machine(),
+                "python_version": sys.version.split()[0],
+                "status": "healthy"
+            }
+            res_text = f"Sistem Operasi: {diag['os']} {diag['release']} ({diag['machine']}), Python: {diag['python_version']}, Status: {diag['status']}"
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [{"type": "text", "text": res_text}],
+                    "data": diag
+                }
+            }
+
+        elif tool_name == "currency_converter":
+            amount = float(tool_args.get("amount", 1))
+            from_curr = str(tool_args.get("from_currency", "USD")).upper()
+            to_curr = str(tool_args.get("to_currency", "IDR")).upper()
+
+            rates_to_idr = {
+                "USD": 15850.0,
+                "EUR": 17200.0,
+                "SGD": 11950.0,
+                "JPY": 105.0,
+                "MYR": 3550.0,
+                "IDR": 1.0
+            }
+            rate_from = rates_to_idr.get(from_curr, 15850.0)
+            rate_to = rates_to_idr.get(to_curr, 1.0)
+            converted = (amount * rate_from) / rate_to
+            formatted_res = f"{amount:,.2f} {from_curr} = {converted:,.2f} {to_curr} (Kurs estimasi pasar)"
+
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [{"type": "text", "text": formatted_res}],
+                    "data": {
+                        "amount": amount,
+                        "from_currency": from_curr,
+                        "to_currency": to_curr,
+                        "result": converted,
+                        "rate": rate_from / rate_to
+                    }
+                }
+            }
+
+        else:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32601,
+                    "message": f"Method atau tool '{tool_name}' tidak ditemukan di MCP server."
+                }
+            }
+
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "error": {
+            "code": -32600,
+            "message": f"Invalid JSON-RPC request method: '{method}'."
+        }
+    }

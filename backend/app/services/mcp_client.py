@@ -62,7 +62,30 @@ class MCPClientService:
                 if response.status_code == 200:
                     data = response.json()
                     if "result" in data:
-                        return data["result"]
+                        res = data["result"]
+                        if isinstance(res, dict) and "content" in res and isinstance(res["content"], list):
+                            texts = [c.get("text", "") for c in res["content"] if isinstance(c, dict) and c.get("type") == "text"]
+                            output_text = "\n".join(texts)
+                            return {
+                                "status": "ok",
+                                "output": output_text,
+                                "data": res.get("data", {}),
+                                "_source": f"MCP: {server_url}",
+                                "_endpoint": server_url
+                            }
+                        if isinstance(res, dict):
+                            res["_source"] = f"MCP: {server_url}"
+                            res["_endpoint"] = server_url
+                        return res
+                    elif "error" in data:
+                        err_msg = data["error"].get("message", "Unknown MCP error")
+                        return {
+                            "status": "error",
+                            "error_type": "MCP_ERROR",
+                            "_source": f"MCP: {server_url}",
+                            "_endpoint": server_url,
+                            "message": err_msg
+                        }
         except Exception as e:
             raise RuntimeError(f"MCP tool '{tool_name}' gagal dieksekusi: {e}") from e
         raise RuntimeError(f"MCP tool '{tool_name}' tidak mengembalikan hasil yang valid.")

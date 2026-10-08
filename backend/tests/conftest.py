@@ -38,6 +38,8 @@ async def prepare_database():
             ("check_bpjs", "Cek status kepesertaan BPJS dan eligibility layanan", "builtin"),
             ("search_web", "Search the web for real-time information", "builtin"),
             ("hospital_finder", "Cari data rumah sakit terdekat dan status faskes BPJS", "builtin"),
+            ("calculator", "Evaluasi ekspresi matematika dan kalkulasi angka secara presisi", "builtin"),
+            ("api_fetch", "Panggil REST API publik melalui HTTP GET atau POST", "builtin"),
         ]
         from datetime import datetime, timezone
         for t_name, t_desc, t_source in default_builtin_tools:

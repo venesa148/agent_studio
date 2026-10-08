@@ -22,6 +22,14 @@ interface SuggestedServer {
 
 const SUGGESTED_SERVERS: SuggestedServer[] = [
   {
+    name: "Local Built-in MCP Server",
+    badge: "no key",
+    description:
+      "Server MCP lokal bawaan Studio: system_time, system_diagnostics, currency_converter siap pakai tanpa API key.",
+    defaultUrl: "http://localhost:8000/api/v1/mcp/local-server",
+    authDefault: "No credential",
+  },
+  {
     name: "Cloudflare Docs",
     badge: "no key",
     description:

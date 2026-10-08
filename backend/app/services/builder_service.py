@@ -125,7 +125,11 @@ class BuilderService:
             model = settings.LLM_MODEL
 
         if client and model:
-            tools_info = ", ".join([f"{k} ({v})" for k,v in valid_db_tools.items()]) if valid_db_tools else "Belum ada tools aktif di database."
+            tools_info_list = []
+            for t in db_tools:
+                src_label = f"[{t.source_type.upper()}]" if t.source_type else "[TOOL]"
+                tools_info_list.append(f"{t.name} ({src_label}: {t.description or 'No description'})")
+            tools_info = "\n".join([f"- {item}" for item in tools_info_list]) if tools_info_list else "Belum ada tools aktif di database."
             current_spec_json = current_spec.model_dump_json() if current_spec else "Belum ada spesifikasi awal."
             
             system_msg = (
@@ -137,9 +141,18 @@ class BuilderService:
                 "   - Rancang draf awal nama & fungsi di objek 'spec' agar pengguna melihat gambaran visualnya, namun jelaskan di 'message' bahwa ini draf awal dan tanyakan konfirmasi mereka.\n\n"
                 "2. GALI BATASAN & PREFERENSI (Guardrails):\n"
                 "   - Tanyakan apakah ada aturan khusus (misal: gaya bahasa santai/formal, batasan privasi, pantangan medis, pantangan topik).\n\n"
-                "3. PILIH TOOLS DARI DATABASE KATALOG (100% DINAMIS):\n"
-                f"   - Tool yang aktif di database HANYA: {tools_info}.\n"
-                "   - Pilih HANYA nama tool yang benar-benar ada di daftar di atas. Jika tidak ada yang relevan, kosongkan []. DILARANG MENGARANG NAMA TOOL.\n\n"
+                "3. PILIH TOOLS DARI DATABASE KATALOG (100% DINAMIS & CERDAS):\n"
+                f"   - Tool yang aktif di database saat ini:\n{tools_info}\n"
+                "   - Panduan kecocokan kebutuhan:\n"
+                "     * Butuh info web/berita/referensi riil online -> 'search_web'\n"
+                "     * Butuh hitungan matematika presisi -> 'calculator'\n"
+                "     * Butuh request REST API eksternal -> 'api_fetch'\n"
+                "     * Butuh waktu/tanggal/jam server saat ini -> 'system_time'\n"
+                "     * Butuh info spek sistem/runtime OS -> 'system_diagnostics'\n"
+                "     * Butuh konversi nilai kurs uang asing ke IDR -> 'currency_converter'\n"
+                "     * Butuh data rumah sakit / rujukan kesehatan -> 'search_hospital', 'get_referral_status'\n"
+                "   - Pilih HANYA nama tool yang benar-benar ada di daftar di atas. Jika tidak ada yang relevan, kosongkan []. DILARANG MENGARANG NAMA TOOL.\n"
+                "   - Dalam 'instructions' (system prompt agent), sertakan instruksi jelas bagaimana agen harus memanfaatkan tool-tool tersebut secara jujur tanpa halusinasi.\n\n"
                 "4. DRAF PREVIEW & REVISI BERKELANJUTAN:\n"
                 "   - Setiap kali pengguna memberikan detail baru atau meminta revisi (contoh: 'tambahkan estimasi waktu', 'ganti namanya'), perbarui isi 'spec'.\n"
                 "   - Di 'message', jelaskan poin-poin yang baru Anda perbarui dan tanyakan apakah ada hal lain yang ingin disesuaikan.\n\n"
@@ -154,7 +167,7 @@ class BuilderService:
                 '  "spec": {\n'
                 '    "name": "Nama Agent",\n'
                 '    "description": "Deskripsi singkat fungsi agen",\n'
-                '    "instructions": "System prompt lengkap (Peran, SOP, Gaya Bahasa, Batasan Keamanan)",\n'
+                '    "instructions": "System prompt lengkap (Peran, SOP, Gaya Bahasa, Batasan Keamanan, dan Aturan Penggunaan Tool)",\n'
                 '    "tools": ["nama_tool_1"]\n'
                 '  }\n'
                 "}\n\n"
@@ -195,6 +208,16 @@ class BuilderService:
                         instructions = spec_data.get("instructions", "")
                         tools = [t for t in spec_data.get("tools", []) if t in valid_db_tools]
                         
+                        mcp_servers: List[str] = []
+                        if tools:
+                            t_query = await db.execute(
+                                select(ToolModel.mcp_server_id).where(
+                                    ToolModel.name.in_(tools),
+                                    ToolModel.mcp_server_id.isnot(None)
+                                )
+                            )
+                            mcp_servers = list(set([r[0] for r in t_query.fetchall() if r[0]]))
+
                         if should_commit:
                             db_agent = None
                             if current_spec and current_spec.id:
@@ -206,10 +229,11 @@ class BuilderService:
                                 db_agent.description = description
                                 db_agent.instructions = instructions
                                 db_agent.tools = tools
+                                db_agent.mcp_servers = mcp_servers
                             else:
                                 db_agent = AgentSpecModel(
                                     name=name, description=description, instructions=instructions,
-                                    model=(settings.LLM_MODEL or "z-ai/glm-5.3"), tools=tools, mcp_servers=[], harness="default-safe-v1", status="active"
+                                    model=(settings.LLM_MODEL or "z-ai/glm-5.3"), tools=tools, mcp_servers=mcp_servers, harness="default-safe-v1", status="active"
                                 )
                                 db.add(db_agent)
                                 
@@ -231,7 +255,7 @@ class BuilderService:
                                 instructions=instructions,
                                 tools=tools,
                                 model=(settings.LLM_MODEL or "z-ai/glm-5.3"),
-                                mcp_servers=[],
+                                mcp_servers=mcp_servers,
                                 harness="default-safe-v1",
                                 status="draft"
                             )
@@ -274,13 +298,23 @@ class BuilderService:
             description = f"Agent untuk: {prompt_trimmed}"
             instructions = f"Peran dan tujuan agent ini berasal dari permintaan pengguna: {prompt_trimmed}\n\nJawab sesuai peran tersebut."
             tools = await BuilderService._select_tools_from_db(db, prompt_trimmed)
+            mcp_servers = []
+            if tools:
+                t_query = await db.execute(
+                    select(ToolModel.mcp_server_id).where(
+                        ToolModel.name.in_(tools),
+                        ToolModel.mcp_server_id.isnot(None)
+                    )
+                )
+                mcp_servers = list(set([r[0] for r in t_query.fetchall() if r[0]]))
+
             draft_spec = AgentSpec(
                 name=name,
                 description=description,
                 instructions=instructions,
                 model=(settings.LLM_MODEL or "z-ai/glm-5.3"),
                 tools=tools,
-                mcp_servers=[],
+                mcp_servers=mcp_servers,
                 harness="default-safe-v1",
                 status="draft"
             )

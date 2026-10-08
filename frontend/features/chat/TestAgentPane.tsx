@@ -72,19 +72,25 @@ interface ChatMessage {
 
 function ToolExecutionCard({ toolCall }: { toolCall: ToolExecutionInfo }) {
   const [expanded, setExpanded] = useState(false);
-  const endpoint = toolCall.endpoint || "https://sisters-given-cloud-nerve.trycloudflare.com";
-  const source = toolCall.source || "Database MySQL Web Teman (40 Data RS)";
-  const isOk = toolCall.status !== "error";
+  const endpoint = toolCall.endpoint || "internal://tool";
+  const source = toolCall.source || "Sistem Eksekusi";
+  const isError = toolCall.status === "error" || (typeof toolCall.result === "object" && toolCall.result?.status === "error");
 
   return (
-    <div className="rounded-xl border border-blue-200/90 bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-white p-2.5 text-xs shadow-2xs space-y-2 mt-1">
+    <div className={`rounded-xl border ${isError ? "border-rose-200 bg-gradient-to-r from-rose-50/70 via-orange-50/30 to-white" : "border-blue-200/90 bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-white"} p-2.5 text-xs shadow-2xs space-y-2 mt-1`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5 font-semibold text-slate-800">
-          <Globe className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
-          <span className="font-mono text-blue-700">{toolCall.name}()</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
-            HTTP 200 OK
-          </span>
+          <Globe className={`w-3.5 h-3.5 ${isError ? "text-rose-500" : "text-blue-600 animate-pulse"}`} />
+          <span className={`font-mono ${isError ? "text-rose-700" : "text-blue-700"}`}>{toolCall.name}()</span>
+          {isError ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold border border-rose-300">
+              Offline / Error
+            </span>
+          ) : (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
+              HTTP 200 OK
+            </span>
+          )}
         </div>
         <span className="text-[10px] font-mono text-slate-500 font-medium">
           ⏱️ {toolCall.duration_ms}ms
@@ -117,8 +123,8 @@ function ToolExecutionCard({ toolCall }: { toolCall: ToolExecutionInfo }) {
           </div>
           <div>
             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5 flex items-center justify-between">
-              <span>Data MySQL dari Web Teman (Response)</span>
-              <span className="text-[9px] text-emerald-600 font-normal">{source}</span>
+              <span>Hasil Eksekusi Response</span>
+              <span className={`text-[9px] font-normal ${isError ? "text-rose-600" : "text-emerald-600"}`}>{source}</span>
             </div>
             <pre className="text-[10px] text-slate-700 font-mono bg-white p-2 rounded-lg border border-slate-200 overflow-x-auto max-h-40 whitespace-pre-wrap">
               {typeof toolCall.result === "object"
@@ -579,12 +585,12 @@ guardrails:
         .filter((s: any) => s.type === "tool_calling" || (s.tool_name && s.tool_name !== "pre_check_guardrail" && s.tool_name !== "post_check_escalation"))
         .map((s: any) => ({
           name: s.tool_name || s.title || "tool",
-          endpoint: s.endpoint || s.result?._endpoint || "https://sisters-given-cloud-nerve.trycloudflare.com",
-          source: s.source || s.result?._source || "Database MySQL Web Teman",
+          endpoint: s.endpoint || s.result?._endpoint || "",
+          source: s.source || s.result?._source || "Sistem Eksekusi",
           params: s.params || {},
           result: s.result || {},
           duration_ms: s.duration_ms ?? 0,
-          status: s.status || "ok",
+          status: s.status || (s.result?.status === "error" ? "error" : "ok"),
         }));
 
       const agentMsg: ChatMessage = {
@@ -1386,6 +1392,34 @@ guardrails:
       {/* Tab 1: Chat Pane Content */}
       {activeTab === "chat" && (
         <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50/50">
+          {activeAgent && (
+            <div className="px-3 py-1.5 bg-white border-b border-slate-100 flex items-center justify-between gap-2 text-[11px] shrink-0">
+              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                <span className="font-semibold text-slate-500 text-[10px] uppercase tracking-wider">
+                  Tools:
+                </span>
+                {activeAgent.tools && activeAgent.tools.length > 0 ? (
+                  activeAgent.tools.map((t) => (
+                    <span
+                      key={t}
+                      className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-blue-50 text-blue-700 border border-blue-200/60 font-medium"
+                    >
+                      {t}()
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-slate-400 italic text-[10px]">
+                    Tanpa Tools (Pure LLM)
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 shrink-0 text-[10px] text-slate-400">
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 font-mono text-slate-600">
+                  {activeAgent.model}
+                </span>
+              </div>
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
             {!activeAgent ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
@@ -1404,8 +1438,21 @@ guardrails:
                   Uji coba percakapan dengan Agent: &ldquo;{activeAgent.name}&rdquo;
                 </p>
                 <p className="text-[11px] text-slate-400 mt-1 max-w-[240px]">
-                  Instruksi aktif tersimpan di database: &ldquo;{activeAgent.instructions?.substring(0, 60)}...&rdquo;
+                  Instruksi aktif: &ldquo;{activeAgent.instructions?.substring(0, 60)}...&rdquo;
                 </p>
+                {activeAgent.tools && activeAgent.tools.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap justify-center gap-1 max-w-[260px]">
+                    {activeAgent.tools.map((t) => (
+                      <span key={t} className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-mono">
+                        ⚡ {t}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-400 italic mt-2">
+                    Agent ini tidak memiliki tools. Jawaban murni berbasis LLM.
+                  </p>
+                )}
               </div>
             ) : (
               messages.map((msg) => (
