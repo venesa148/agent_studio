@@ -18,8 +18,9 @@ import uuid
 import time
 import asyncio
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
+import httpx
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -67,6 +68,8 @@ class InvokeResponse(BaseModel):
 class DeployRequest(BaseModel):
     yaml_content: str
     api_key: Optional[str] = None
+    slug: Optional[str] = None
+    target_environment: Optional[str] = None
 
 
 # =============================================================================
@@ -83,6 +86,8 @@ class AgentRuntimeEngine:
         self.system_prompt: str = ""
         self.nodes_by_id: Dict[str, Dict[str, Any]] = {}
         self.entry_node: str = ""
+        self.tools_required: List[Dict[str, Any]] = []
+        self.tools_by_ref: Dict[str, Dict[str, Any]] = {}
         self.load_config()
 
     def load_config(self, content: Optional[str] = None):
@@ -140,9 +145,21 @@ class AgentRuntimeEngine:
                     "selesai": {"id": "selesai", "type": "end"}
                 }
 
+            # 4. Parse tools_required dan tools list
+            self.tools_required = self.raw_spec.get("tools_required", [])
+            self.tools_by_ref = {}
+            for t in self.tools_required:
+                ref = t.get("tool_ref") or t.get("name") or t.get("tool_name")
+                if ref:
+                    self.tools_by_ref[ref] = t
+            for tname in self.raw_spec.get("tools", []):
+                if isinstance(tname, str) and tname not in self.tools_by_ref:
+                    self.tools_by_ref[tname] = {"tool_ref": tname, "endpoint": None, "connection_status": "unconfigured"}
+
             logger.info(
                 f"[Agent Runtime] Berhasil memuat config: '{self.name}' "
-                f"(ID: {self.agent_id}, v{self.version}) dengan {len(self.nodes_by_id)} node graph."
+                f"(ID: {self.agent_id}, v{self.version}) dengan {len(self.nodes_by_id)} node graph "
+                f"dan {len(self.tools_by_ref)} registered tools."
             )
         except Exception as e:
             logger.error(f"Gagal memuat config YAML: {e}")
@@ -176,12 +193,214 @@ class AgentRuntimeEngine:
             }
         }
 
-    async def execute_llm_step(self, instruction: str, system_prompt: str, user_message: str, context: Dict[str, Any]) -> str:
-        """Memanggil LLM (Anthropic / OpenAI / OpenRouter) sesuai model di YAML atau fallback lokal."""
+    async def execute_tool(self, tool_ref: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Eksekusi live HTTP call ke Web API / MCP Server atau internal tool berdasarkan spesifikasi YAML."""
+        logger.info(f"[Runtime Tool Call] Menjalankan tool '{tool_ref}' dengan params: {params}")
+
+        # 1. Cari spesifikasi tool dari YAML
+        tool_info = self.tools_by_ref.get(tool_ref) or {}
+        endpoint = tool_info.get("endpoint")
+        method = str(tool_info.get("method") or "POST").upper()
+
+        # Fallback dinamis jika endpoint belum terdefinisi di YAML tetapi ada server tunnel di env
+        if not endpoint:
+            api_base = (
+                os.getenv("EXTERNAL_MOCK_API_URL")
+                or os.getenv("CLOUDFLARE_TUNNEL_URL")
+                or "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com"
+            ).rstrip("/")
+
+            bpjs_routes = {
+                "check_bpjs": f"{api_base}/api/v1/mock-bpjs/check-bpjs",
+                "get_participant_status": f"{api_base}/api/v1/mock-bpjs/check-bpjs",
+                "get_referral_status": f"{api_base}/api/v1/mock-bpjs/referral-status",
+                "search_hospital": f"{api_base}/api/v1/mock-bpjs/hospitals",
+                "hospital_finder": f"{api_base}/api/v1/mock-bpjs/hospitals",
+                "search_hospitals": f"{api_base}/api/v1/mock-bpjs/hospitals",
+                "find_specialist": f"{api_base}/api/v1/mock-bpjs/specialists",
+                "search_doctors": f"{api_base}/api/v1/mock-bpjs/specialists",
+                "mcp_hospital_doctor_search": f"{api_base}/api/v1/mock-bpjs/specialists",
+                "create_appointment": f"{api_base}/api/v1/mock-bpjs/appointments",
+                "book_appointment": f"{api_base}/api/v1/mock-bpjs/appointments",
+                "mcp_calendar_booking": f"{api_base}/api/v1/mock-bpjs/appointments",
+            }
+            if tool_ref in bpjs_routes:
+                endpoint = bpjs_routes[tool_ref]
+
+        # 2. Eksekusi jika endpoint adalah live URL HTTP/HTTPS
+        if endpoint and (endpoint.startswith("http://") or endpoint.startswith("https://")):
+            headers = {"Content-Type": "application/json"}
+            auth_secret = tool_info.get("auth_secret_ref")
+            if auth_secret:
+                headers["Authorization"] = f"Bearer {auth_secret}"
+
+            # Normalisasi parameter payload untuk API eksternal
+            norm_params = dict(params)
+            if "hospital_name" in norm_params and "location" not in norm_params:
+                norm_params["location"] = norm_params["hospital_name"]
+            if "city" in norm_params and "location" not in norm_params:
+                norm_params["location"] = norm_params["city"]
+            if "bpjs_id" in norm_params and "number" not in norm_params:
+                norm_params["number"] = norm_params["bpjs_id"]
+            if "participant_id" in norm_params and "number" not in norm_params:
+                norm_params["number"] = norm_params["participant_id"]
+            if "referral_id" in norm_params and "referral_no" not in norm_params:
+                norm_params["referral_no"] = norm_params["referral_id"]
+
+            try:
+                async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                    if method == "GET":
+                        resp = await client.get(endpoint, params=norm_params, headers=headers)
+                    else:
+                        resp = await client.post(endpoint, json=norm_params, headers=headers)
+
+                    if resp.status_code == 200:
+                        try:
+                            body = resp.json()
+                            if isinstance(body, dict):
+                                data = body.get("data", body)
+                                if isinstance(data, dict):
+                                    data["_endpoint"] = endpoint
+                                    data["_source"] = tool_info.get("mcp_server_name") or "Live Web API"
+                                    return data
+                                elif isinstance(data, list):
+                                    return {
+                                        "status": "ok",
+                                        "count": len(data),
+                                        "items": data,
+                                        "_endpoint": endpoint,
+                                        "_source": tool_info.get("mcp_server_name") or "Live Web API"
+                                    }
+                                return {"status": "ok", "result": data, "_endpoint": endpoint}
+                            elif isinstance(body, list):
+                                return {
+                                    "status": "ok",
+                                    "count": len(body),
+                                    "items": body,
+                                    "_endpoint": endpoint,
+                                    "_source": tool_info.get("mcp_server_name") or "Live Web API"
+                                }
+                            return {"status": "ok", "result": body, "_endpoint": endpoint}
+                        except Exception:
+                            return {"status": "ok", "text": resp.text, "_endpoint": endpoint}
+                    else:
+                        return {
+                            "status": "error",
+                            "status_code": resp.status_code,
+                            "_endpoint": endpoint,
+                            "_source": "Live Web API",
+                            "message": f"Server eksternal mengembalikan HTTP {resp.status_code} untuk tool '{tool_ref}'."
+                        }
+            except Exception as e:
+                logger.warning(f"[Live Tool Error] Request ke {endpoint} gagal: {e}")
+                return {
+                    "status": "error",
+                    "error_type": "SERVICE_UNAVAILABLE",
+                    "_endpoint": endpoint,
+                    "_source": "Live Web API (Offline)",
+                    "message": f"Server live API ({endpoint}) tidak dapat dihubungi: {str(e)}"
+                }
+
+        # 3. Tool Internal: Clinical Triage (classify_complaint)
+        if tool_ref == "classify_complaint" or (endpoint and "classify_complaint" in endpoint):
+            complaint = str(params.get("complaint") or params.get("keluhan") or "").strip()
+            if not complaint:
+                return {"status": "error", "message": "Parameter 'complaint' tidak boleh kosong."}
+
+            complaint_lower = complaint.lower()
+            red_flags = ["pingsan", "sesak nafas", "nyeri dada hebat", "darurat", "kejang", "tidak sadar", "pendarahan hebat", "stroke", "lumpuh", "koma"]
+            matched_red_flags = [rf for rf in red_flags if rf in complaint_lower]
+            if matched_red_flags:
+                return {
+                    "status": "ok",
+                    "triage_class": "EMERGENCY",
+                    "red_flag": True,
+                    "matched_red_flags": matched_red_flags,
+                    "candidate_service": ["IGD / Instalasi Gawat Darurat"],
+                    "action": "ESCALATE_TO_EMERGENCY",
+                    "_source": "Clinical Triage Protocol",
+                    "_endpoint": "internal://triage/classify_complaint",
+                    "message": "Terdeteksi indikasi gawat darurat (Red Flag). Alur booking dihentikan. Segera arahkan pasien ke IGD rumah sakit terdekat atau hubungi 119."
+                }
+
+            ortho_kw = ["lutut", "sendi", "tulang", "patah", "keseleo", "otot", "kaki", "pinggang", "punggung", "tangan", "bahu"]
+            jantung_kw = ["jantung", "dada", "debar", "koroner", "aritmia"]
+            mata_kw = ["mata", "kabur", "katarak", "minus", "silinder"]
+            anak_kw = ["bayi", "balita", "anak", "imunisasi", "tumbuh kembang"]
+
+            poli = "Poli Umum"
+            if any(k in complaint_lower for k in ortho_kw):
+                poli = "Poli Orthopaedi & Bedah Tulang"
+            elif any(k in complaint_lower for k in jantung_kw):
+                poli = "Poli Jantung & Pembuluh Darah"
+            elif any(k in complaint_lower for k in mata_kw):
+                poli = "Poli Mata"
+            elif any(k in complaint_lower for k in anak_kw):
+                poli = "Poli Anak"
+
+            return {
+                "status": "ok",
+                "triage_class": "NON_EMERGENCY",
+                "red_flag": False,
+                "recommended_specialty": poli,
+                "_source": "Clinical Triage Protocol",
+                "_endpoint": "internal://triage/classify_complaint"
+            }
+
+        # 4. Tool Internal: Calculator
+        if tool_ref in ["calculator", "math_eval"]:
+            expr = str(params.get("expression") or params.get("expr") or "").strip()
+            if not expr:
+                return {"status": "error", "message": "Parameter 'expression' tidak boleh kosong."}
+            try:
+                import ast
+                import operator
+                ops = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}
+                def _eval(node):
+                    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                        return node.value
+                    elif isinstance(node, ast.BinOp) and type(node.op) in ops:
+                        return ops[type(node.op)](_eval(node.left), _eval(node.right))
+                    raise ValueError("Operator tidak diizinkan")
+                parsed = ast.parse(expr, mode='eval')
+                return {"status": "ok", "expression": expr, "result": _eval(parsed.body), "_endpoint": "internal://calc"}
+            except Exception as e_c:
+                return {"status": "error", "message": f"Gagal kalkulasi: {e_c}"}
+
+        # 5. Tool Internal: Web Search
+        if tool_ref == "search_web":
+            query = str(params.get("query") or params.get("q") or "").strip()
+            try:
+                from ddgs import DDGS
+                with DDGS() as ddgs:
+                    raw = list(ddgs.text(query, region="id-id", max_results=3))
+                if raw:
+                    return {
+                        "status": "ok",
+                        "query": query,
+                        "results": [{"title": r.get("title"), "snippet": r.get("body"), "url": r.get("href")} for r in raw],
+                        "_source": "DuckDuckGo Web Search",
+                        "_endpoint": "https://duckduckgo.com"
+                    }
+            except Exception:
+                pass
+            return {"status": "error", "query": query, "message": "Pencarian web tidak tersedia saat ini."}
+
+        # 6. Fallback jika tool belum terkonfigurasi
+        return {
+            "status": "unconfigured",
+            "tool": tool_ref,
+            "message": f"Tool '{tool_ref}' belum dikonfigurasi endpoint live-nya di file YAML.",
+            "params": params
+        }
+
+    async def execute_llm_step(
+        self, instruction: str, system_prompt: str, user_message: str, context: Dict[str, Any]
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        """Memanggil LLM (Anthropic / OpenAI / OpenRouter) dengan dukungan dynamic tool calling."""
         anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
         openai_key = os.getenv("OPENAI_API_KEY", "")
 
-        # Ekstrak model dari configuration atau model
         model_cfg = self.raw_spec.get("configuration", {}).get("model") or self.raw_spec.get("model", {})
         if isinstance(model_cfg, dict):
             model_name = model_cfg.get("name", "gpt-4o-mini")
@@ -192,6 +411,24 @@ class AgentRuntimeEngine:
         else:
             model_name = "gpt-4o-mini"
             max_tokens = 1024
+
+        executed_tool_calls: List[Dict[str, Any]] = []
+
+        # Siapkan tool schemas untuk OpenAI / OpenRouter function calling
+        openai_tools = []
+        for ref, t_info in self.tools_by_ref.items():
+            schema = t_info.get("input_schema")
+            if not isinstance(schema, dict) or "type" not in schema:
+                schema = {"type": "object", "properties": {}}
+            desc = t_info.get("purpose") or t_info.get("description") or f"Layanan tool {ref}"
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": ref,
+                    "description": desc,
+                    "parameters": schema
+                }
+            })
 
         # 1. Coba Anthropic jika terkonfigurasi
         if anthropic_key and anthropic_key != "sk-ant-...":
@@ -210,7 +447,7 @@ class AgentRuntimeEngine:
                     system=system_prompt,
                     messages=[{"role": "user", "content": prompt_full}]
                 )
-                return msg.content[0].text
+                return msg.content[0].text, executed_tool_calls
             except Exception as e:
                 logger.warning(f"Gagal memanggil Anthropic ({e}), mencoba fallback...")
 
@@ -231,44 +468,72 @@ class AgentRuntimeEngine:
                     f"Konteks riwayat: {json.dumps(context, ensure_ascii=False)}\n"
                     f"Pesan pengguna: {user_message}"
                 )
-                res = await client.chat.completions.create(
-                    model=target_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt_full}
-                    ],
-                    max_tokens=max_tokens,
-                    temperature=0.3
-                )
-                return res.choices[0].message.content or ""
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt_full}
+                ]
+
+                call_args: Dict[str, Any] = {
+                    "model": target_model,
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": 0.3
+                }
+                if openai_tools:
+                    call_args["tools"] = openai_tools
+
+                res = await client.chat.completions.create(**call_args)
+                msg = res.choices[0].message
+
+                # Jika LLM memutuskan memanggil tools
+                if msg.tool_calls:
+                    tool_calls_payload = []
+                    for tc in msg.tool_calls:
+                        tool_calls_payload.append({
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {"name": tc.function.name, "arguments": tc.function.arguments or "{}"}
+                        })
+                    messages.append({
+                        "role": "assistant",
+                        "content": msg.content or "",
+                        "tool_calls": tool_calls_payload
+                    })
+
+                    for tc in msg.tool_calls:
+                        fn_name = tc.function.name
+                        try:
+                            fn_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                        except Exception:
+                            fn_args = {}
+                        tool_res = await self.execute_tool(fn_name, fn_args)
+                        executed_tool_calls.append({"tool": fn_name, "params": fn_args, "result": tool_res})
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": json.dumps(tool_res, ensure_ascii=False)
+                        })
+
+                    # Panggil kembali LLM untuk merangkum hasil tool
+                    second_res = await client.chat.completions.create(
+                        model=target_model,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        temperature=0.3
+                    )
+                    return second_res.choices[0].message.content or "", executed_tool_calls
+
+                return msg.content or "", executed_tool_calls
             except Exception as e:
                 logger.warning(f"Gagal memanggil OpenAI/OpenRouter ({e}), menggunakan runtime responder...")
 
-        # 3. Fallback responder universal (jika API key belum disetel atau offline)
-        return (
+        # 3. Fallback responder universal (jika offline)
+        fallback_text = (
             f"Halo! Saya {self.name}. Pesan Anda: \"{user_message}\" telah berhasil diproses oleh runtime. "
             f"(Peran agen: {self.description or 'Asisten AI'}. "
             f"Langkah aktif: {instruction or 'Menanggapi kebutuhan pengguna'}.)"
         )
-
-    async def execute_tool(self, tool_ref: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Eksekusi panggilan tool MCP / API internal"""
-        logger.info(f"[Runtime Tool Call] Menjalankan tool '{tool_ref}' dengan params: {params}")
-        if tool_ref == "mcp_hospital_doctor_search":
-            return {
-                "dokter_id": "DOK-402",
-                "nama_dokter": "dr. Budi Santoso, Sp.PD (Spesialis Penyakit Dalam)",
-                "jadwal": "Senin - Kamis, 09:00 - 14:00 WIB",
-                "rumah_sakit": "RSUD Tarakan (Rekanan BPJS Kesehatan)"
-            }
-        elif tool_ref == "mcp_calendar_booking":
-            return {
-                "booking_id": f"BK-{uuid.uuid4().hex[:6].upper()}",
-                "status": "confirmed",
-                "antrian_no": "A-14",
-                "estimasi_jam": "10:30 WIB"
-            }
-        return {"status": "success", "tool": tool_ref, "result": f"Tool '{tool_ref}' dieksekusi dengan parameter: {params}"}
+        return fallback_text, executed_tool_calls
 
     async def run_step(self, session_id: str, user_message: str) -> InvokeResponse:
         # Guardrail check: max turns
@@ -320,7 +585,8 @@ class AgentRuntimeEngine:
         # Logika eksekusi node
         if node_type == "llm_step":
             instruction = node.get("instruction", "")
-            response_text = await self.execute_llm_step(instruction, system_prompt, user_message, session["node_outputs"])
+            response_text, step_tool_calls = await self.execute_llm_step(instruction, system_prompt, user_message, session["node_outputs"])
+            executed_tools.extend(step_tool_calls)
             session["node_outputs"][curr_node_id] = response_text
 
             # Cek jika ada output classification

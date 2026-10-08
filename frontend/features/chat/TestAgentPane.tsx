@@ -214,6 +214,92 @@ export function TestAgentPane({
     const formattedDesc = formatYamlBlock(rawDesc, 4);
     const formattedInstructions = formatYamlBlock(rawInstructions, 2);
 
+    const knownEndpoints: Record<string, { endpoint: string; method: string; purpose: string; source: string }> = {
+      check_bpjs: {
+        endpoint: "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/check-bpjs",
+        method: "POST",
+        purpose: "Validasi status kepesertaan dan kartu BPJS Kesehatan",
+        source: "web_api",
+      },
+      get_participant_status: {
+        endpoint: "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/check-bpjs",
+        method: "POST",
+        purpose: "Cek nomor kartu BPJS atau NIK peserta",
+        source: "web_api",
+      },
+      get_referral_status: {
+        endpoint: "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/referral-status",
+        method: "POST",
+        purpose: "Verifikasi status dan masa berlaku surat rujukan faskes BPJS",
+        source: "web_api",
+      },
+      search_hospital: {
+        endpoint: "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/hospitals",
+        method: "POST",
+        purpose: "Pencarian rumah sakit rekanan BPJS berdasarkan kota",
+        source: "web_api",
+      },
+      hospital_finder: {
+        endpoint: "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/hospitals",
+        method: "POST",
+        purpose: "Mencari fasilitas kesehatan dan rumah sakit terdekat",
+        source: "web_api",
+      },
+      search_hospitals: {
+        endpoint: "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/hospitals",
+        method: "POST",
+        purpose: "Mencari rumah sakit rekanan BPJS dengan layanan tertentu",
+        source: "web_api",
+      },
+      find_specialist: {
+        endpoint: "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/specialists",
+        method: "POST",
+        purpose: "Pencarian dokter spesialis di rumah sakit rekanan",
+        source: "web_api",
+      },
+      search_doctors: {
+        endpoint: "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/specialists",
+        method: "POST",
+        purpose: "Cek jadwal dan daftar dokter spesialis",
+        source: "web_api",
+      },
+      classify_complaint: {
+        endpoint: "internal://triage/classify_complaint",
+        method: "INTERNAL",
+        purpose: "Klasifikasi keluhan dan penapisan darurat medis",
+        source: "builtin",
+      },
+      search_web: {
+        endpoint: "https://duckduckgo.com",
+        method: "GET",
+        purpose: "Pencarian web real-time untuk regulasi dan info kesehatan publik",
+        source: "builtin",
+      },
+      calculator: {
+        endpoint: "internal://calc/eval",
+        method: "INTERNAL",
+        purpose: "Evaluasi perhitungan matematika atau biaya",
+        source: "builtin",
+      },
+    };
+
+    const formattedToolsRequired = (agent.tools || []).map((t) => {
+      const def = knownEndpoints[t] || {
+        endpoint: `https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/tools/${t}`,
+        method: "POST",
+        purpose: `Layanan tool ${t}`,
+        source: "custom",
+      };
+      return `  - tool_ref: "${t}"
+    tool_name: "${t}"
+    purpose: "${def.purpose}"
+    source_type: "${def.source}"
+    mcp_server_name: "JKN Care Services MCP"
+    endpoint: "${def.endpoint}"
+    method: "${def.method}"
+    connection_status: "connected"`;
+    }).join("\n");
+
     return `spec_version: v1.0
 metadata:
   id: "${agentId}"
@@ -243,10 +329,14 @@ flow:
     - id: "selesai"
       type: "end"
 
-tools_required: ${JSON.stringify(agent.tools || [])}
+tools_required:${formattedToolsRequired ? "\n" + formattedToolsRequired : " []"}
 guardrails:
   max_turns: 15
-  disallowed_behaviors: []
+  strict_grounding: true
+  disallowed_behaviors:
+    - "memberi diagnosis pasti tanpa dokter"
+    - "merekomendasikan obat spesifik"
+    - "mengabaikan keluhan kondisi darurat"
 `;
   };
 

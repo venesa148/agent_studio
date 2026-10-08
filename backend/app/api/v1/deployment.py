@@ -170,28 +170,45 @@ async def get_deployment_status():
 
 @router.get("/yaml-files")
 async def list_available_yaml_files():
-    """Mengembalikan daftar file YAML yang tersedia di backend/"""
+    """Mengembalikan daftar file YAML yang tersedia di backend/, agents/, dan deployed_agents/"""
     backend_dir = Path(__file__).resolve().parents[3]
+    project_root = Path(__file__).resolve().parents[4]
+
+    candidate_dirs = [
+        backend_dir,
+        backend_dir / "deployed_agents",
+        project_root / "agents",
+        project_root / "frontend" / "agent-project" / "agents"
+    ]
+
+    seen_files = set()
     results = []
-    for f in backend_dir.glob("*.yaml"):
-        try:
-            content = f.read_text(encoding="utf-8")
-            data = yaml.safe_load(content) or {}
-            meta = data.get("metadata", {})
-            aid = meta.get("id") or data.get("agent_id") or f.stem
-            aname = meta.get("name") or data.get("name") or f.stem
-            adesc = meta.get("description") or data.get("description") or ""
-            aslug = meta.get("slug") or data.get("slug") or f.stem
-            results.append({
-                "filename": f.name,
-                "agent_id": aid,
-                "name": aname,
-                "slug": aslug,
-                "description": adesc.strip(),
-                "content": content
-            })
-        except Exception as e:
-            results.append({"filename": f.name, "name": f.name, "content": "", "description": str(e)})
+
+    for c_dir in candidate_dirs:
+        if not c_dir.exists():
+            continue
+        for f in c_dir.glob("*.yaml"):
+            if f.name in seen_files:
+                continue
+            seen_files.add(f.name)
+            try:
+                content = f.read_text(encoding="utf-8")
+                data = yaml.safe_load(content) or {}
+                meta = data.get("metadata", {})
+                aid = meta.get("id") or data.get("agent_id") or f.stem
+                aname = meta.get("name") or data.get("name") or f.stem
+                adesc = meta.get("description") or data.get("description") or ""
+                aslug = meta.get("slug") or data.get("slug") or f.stem
+                results.append({
+                    "filename": f.name,
+                    "agent_id": aid,
+                    "name": aname,
+                    "slug": aslug,
+                    "description": adesc.strip(),
+                    "content": content
+                })
+            except Exception as e:
+                results.append({"filename": f.name, "name": f.name, "content": "", "description": str(e)})
     return results
 
 

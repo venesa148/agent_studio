@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.models.agent import AgentSpecModel
 from app.models.chat import ConversationModel, MessageModel
 from app.models.tool import ToolModel
+from app.models.mcp import MCPServerModel
 from app.schemas.agent import AgentSpecCreate, AgentSpecUpdate, AgentTestResponse
 from app.services.tool_registry import ToolRegistryService
 
@@ -687,12 +688,180 @@ class AgentService:
 
     @staticmethod
     async def export_agent_yaml(db: AsyncSession, agent_id: str, save_to_disk: bool = True) -> Optional[Dict[str, Any]]:
-        """Mengekspor spesifikasi Agent ke format deklaratif .YAML standar."""
+        """Mengekspor spesifikasi Agent ke format deklaratif .YAML standar dengan tools_required dan endpoint live terintegrasi."""
         agent = await AgentService.get_agent_by_id(db, agent_id)
         if not agent:
             return None
 
         slug = re.sub(r"[^a-z0-9]+", "_", (agent.name or "agent").lower()).strip("_")
+
+        # 1. Resolusi dinamis endpoint dan server MCP dari database
+        mcp_res = await db.execute(select(MCPServerModel))
+        all_mcps = mcp_res.scalars().all()
+        mcp_by_id = {m.id: m for m in all_mcps}
+
+        # Cari base URL terbaik untuk live API (Cloudflare tunnel / mock API)
+        active_api_base = None
+        for m in all_mcps:
+            if m.url and not m.url.endswith("/local-server") and m.status == "connected":
+                active_api_base = m.url.rstrip("/")
+                break
+        if not active_api_base:
+            active_api_base = (getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "")).rstrip("/")
+
+        # Endpoint mapping deklaratif untuk tool standar BPJS / sistem
+        tool_endpoint_defs: Dict[str, Dict[str, Any]] = {
+            "check_bpjs": {
+                "path": "/api/v1/mock-bpjs/check-bpjs",
+                "method": "POST",
+                "purpose": "Validasi status kepesertaan, NIK, dan nomor kartu BPJS Kesehatan secara real-time",
+            },
+            "get_participant_status": {
+                "path": "/api/v1/mock-bpjs/check-bpjs",
+                "method": "POST",
+                "purpose": "Cek keaktifan nomor kartu BPJS atau NIK peserta",
+            },
+            "get_referral_status": {
+                "path": "/api/v1/mock-bpjs/referral-status",
+                "method": "POST",
+                "purpose": "Verifikasi keabsahan, masa berlaku, dan tujuan faskes dari surat rujukan BPJS",
+            },
+            "search_hospital": {
+                "path": "/api/v1/mock-bpjs/hospitals",
+                "method": "POST",
+                "purpose": "Pencarian rumah sakit rekanan BPJS Kesehatan berdasarkan nama kota/wilayah",
+            },
+            "hospital_finder": {
+                "path": "/api/v1/mock-bpjs/hospitals",
+                "method": "POST",
+                "purpose": "Mencari fasilitas kesehatan dan rumah sakit terdekat sesuai lokasi pengguna",
+            },
+            "search_hospitals": {
+                "path": "/api/v1/mock-bpjs/hospitals",
+                "method": "POST",
+                "purpose": "Mencari rumah sakit rekanan BPJS dengan layanan dan poli tertentu",
+            },
+            "find_specialist": {
+                "path": "/api/v1/mock-bpjs/specialists",
+                "method": "POST",
+                "purpose": "Mencari dokter spesialis di rumah sakit berdasarkan poliklinik dan kota",
+            },
+            "search_doctors": {
+                "path": "/api/v1/mock-bpjs/specialists",
+                "method": "POST",
+                "purpose": "Cek jadwal dan daftar dokter spesialis di fasilitas kesehatan tertentu",
+            },
+            "create_appointment": {
+                "path": "/api/v1/mock-bpjs/appointments",
+                "method": "POST",
+                "purpose": "Reservasi tiket antrean atau pendaftaran jadwal konsultasi dokter",
+            },
+            "get_appointment": {
+                "path": "/api/v1/mock-bpjs/appointments",
+                "method": "GET",
+                "purpose": "Cek status tiket booking dan nomor antrean pasien",
+            },
+            "mcp_hospital_doctor_search": {
+                "path": "/api/v1/mock-bpjs/specialists",
+                "method": "POST",
+                "purpose": "Mencari dokter spesialis rekanan BPJS yang sesuai keluhan pasien",
+            },
+            "mcp_calendar_booking": {
+                "path": "/api/v1/mock-bpjs/appointments",
+                "method": "POST",
+                "purpose": "Menjadwalkan janji temu pasien dengan dokter dan menerbitkan nomor antrean",
+            },
+            "classify_complaint": {
+                "path": "internal://triage/classify_complaint",
+                "method": "INTERNAL",
+                "purpose": "Klasifikasi keluhan pasien dan penapisan darurat medis (Emergency Red Flag)",
+            },
+            "search_web": {
+                "path": "https://duckduckgo.com",
+                "method": "GET",
+                "purpose": "Pencarian web real-time untuk regulasi, pedoman, dan informasi kesehatan publik",
+            },
+            "calculator": {
+                "path": "internal://calc/eval",
+                "method": "INTERNAL",
+                "purpose": "Evaluasi perhitungan matematika atau estimasi biaya/tarif",
+            },
+        }
+
+        # 2. Ambil semua tools yang tercatat di agent
+        tools_list = agent.tools or []
+        tools_res = await db.execute(select(ToolModel).where(ToolModel.name.in_(tools_list)))
+        db_tools_map = {t.name: t for t in tools_res.scalars().all()}
+
+        tools_required_list = []
+        for tname in tools_list:
+            t_obj = db_tools_map.get(tname)
+            t_def = tool_endpoint_defs.get(tname, {})
+
+            # Resolusi endpoint dan method
+            path = t_def.get("path")
+            method = t_def.get("method", "POST")
+            purpose = (t_obj.description if t_obj and t_obj.description else None) or t_def.get("purpose") or f"Layanan tool {tname}"
+
+            # Resolusi sumber MCP Server
+            mcp_srv = None
+            if t_obj and t_obj.mcp_server_id:
+                mcp_srv = mcp_by_id.get(t_obj.mcp_server_id)
+
+            # Cek base URL spesifik tool jika ada di input_schema
+            tool_api_base = None
+            if t_obj and t_obj.input_schema:
+                tool_api_base = (
+                    t_obj.input_schema.get("x-api-config", {}).get("base_url")
+                    or t_obj.input_schema.get("x-openapi", {}).get("server_url")
+                    or t_obj.input_schema.get("base_url")
+                )
+            if not tool_api_base and mcp_srv and mcp_srv.url and not mcp_srv.url.endswith("/local-server"):
+                tool_api_base = mcp_srv.url.rstrip("/")
+            if not tool_api_base:
+                tool_api_base = active_api_base
+
+            endpoint = None
+            conn_status = "unconfigured"
+            source_type = t_obj.source_type if t_obj else "web_api"
+
+            if path:
+                if path.startswith("http://") or path.startswith("https://") or path.startswith("internal://"):
+                    endpoint = path
+                    conn_status = "connected"
+                    if path.startswith("internal://"):
+                        source_type = "builtin"
+                elif path.startswith("/"):
+                    if tool_api_base:
+                        endpoint = f"{tool_api_base}{path}"
+                        conn_status = "connected"
+                    else:
+                        endpoint = None
+                        conn_status = "unconfigured"
+                    source_type = "mcp" if (t_obj and t_obj.source_type == "mcp") else "web_api"
+            else:
+                if tool_api_base:
+                    endpoint = f"{tool_api_base}/tools/{tname}"
+                    conn_status = "connected"
+                source_type = t_obj.source_type if t_obj else "custom"
+
+            # Ambil input schema
+            schema = (t_obj.input_schema if t_obj and t_obj.input_schema else None) or DEFAULT_BUILTIN_SCHEMAS.get(tname, {"type": "object", "properties": {}})
+
+            mcp_name = mcp_srv.name if mcp_srv else ("JKN Care Services MCP" if ("bpjs" in tname or "hospital" in tname or "doctor" in tname or "referral" in tname) else None)
+
+            tools_required_list.append({
+                "tool_ref": tname,
+                "tool_name": t_obj.name if t_obj else tname,
+                "purpose": purpose,
+                "source_type": source_type,
+                "mcp_server_name": mcp_name,
+                "endpoint": endpoint,
+                "method": method,
+                "connection_status": conn_status,
+                "auth_secret_ref": None,
+                "input_schema": schema
+            })
 
         spec_dict = {
             "spec_version": "v1.0",
@@ -711,7 +880,29 @@ class AgentService:
             },
             "tools": agent.tools or [],
             "mcp_servers": agent.mcp_servers or [],
-            "instructions": agent.instructions or ""
+            "instructions": agent.instructions or "",
+            "flow": {
+                "entry_node": "main_step",
+                "nodes": [
+                    {
+                        "id": "main_step",
+                        "type": "llm_step",
+                        "instruction": "Tanggapi dan bantu kebutuhan pengguna dengan memanfaatkan tools yang relevan secara akurat sesuai instruksi.",
+                        "next": "selesai"
+                    },
+                    {"id": "selesai", "type": "end"}
+                ]
+            },
+            "tools_required": tools_required_list,
+            "guardrails": {
+                "max_turns": 15,
+                "strict_grounding": True,
+                "disallowed_behaviors": [
+                    "memberi diagnosis pasti tanpa dokter",
+                    "merekomendasikan obat atau dosis spesifik",
+                    "mengabaikan keluhan yang mengindikasikan kondisi darurat"
+                ]
+            }
         }
 
         import yaml
@@ -730,6 +921,9 @@ class AgentService:
         if save_to_disk:
             import os
             root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+            backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+            # 1. agents/{filename}
             agents_dir = os.path.join(root_dir, "agents")
             os.makedirs(agents_dir, exist_ok=True)
             file_path = os.path.join(agents_dir, filename)
@@ -737,12 +931,27 @@ class AgentService:
                 f.write(yaml_content)
             saved_paths.append(file_path)
 
+            # 2. frontend/agent-project/agents/{filename}
             project_agents_dir = os.path.join(root_dir, "frontend", "agent-project", "agents")
             os.makedirs(project_agents_dir, exist_ok=True)
             fp2 = os.path.join(project_agents_dir, filename)
             with open(fp2, "w", encoding="utf-8") as f:
                 f.write(yaml_content)
             saved_paths.append(fp2)
+
+            # 3. backend/{filename}
+            fp3 = os.path.join(backend_dir, filename)
+            with open(fp3, "w", encoding="utf-8") as f:
+                f.write(yaml_content)
+            saved_paths.append(fp3)
+
+            # 4. backend/deployed_agents/{filename}
+            deployed_dir = os.path.join(backend_dir, "deployed_agents")
+            os.makedirs(deployed_dir, exist_ok=True)
+            fp4 = os.path.join(deployed_dir, filename)
+            with open(fp4, "w", encoding="utf-8") as f:
+                f.write(yaml_content)
+            saved_paths.append(fp4)
 
         return {
             "agent_id": agent.id,
