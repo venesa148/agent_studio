@@ -35,7 +35,7 @@ export default function AllAgentsPage() {
     if (!deletingAgent) return;
     setIsDeleting(true);
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/agent/${deletingAgent.id}`, {
+      const res = await fetch(`/api/v1/agent/${deletingAgent.id}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -54,7 +54,7 @@ export default function AllAgentsPage() {
   const fetchAgents = async () => {
     try {
       setIsLoading(true);
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
       const res = await fetch(`${apiUrl}/api/v1/agent`);
       if (res.ok) {
         const data = await res.json();

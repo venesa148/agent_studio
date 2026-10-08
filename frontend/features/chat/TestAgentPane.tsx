@@ -181,7 +181,7 @@ export function TestAgentPane({
   const [showYamlEditor, setShowYamlEditor] = useState<boolean>(false);
   const [uploadedFileName, setUploadedFileName] = useState<string>("");
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
   // Helper untuk memformat multiline text ke indentasi YAML yang valid
   const formatYamlBlock = (text: string, indentSpaces: number = 2): string => {
@@ -630,7 +630,7 @@ guardrails:
     setErrorMessage(null);
     if (activeAgent?.id) {
       try {
-        await fetch(`http://localhost:8000/api/v1/agent/${activeAgent.id}/history`, {
+        await fetch(`/api/v1/agent/${activeAgent.id}/history`, {
           method: "DELETE",
         });
       } catch (err) {
@@ -642,7 +642,7 @@ guardrails:
   const handleExportYaml = async () => {
     if (!activeAgent?.id) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/agent/${activeAgent.id}/export-yaml?download=true`);
+      const res = await fetch(`/api/v1/agent/${activeAgent.id}/export-yaml?download=true`);
       if (!res.ok) throw new Error("Gagal mengunduh berkas YAML.");
       const blob = await res.blob();
       const downloadUrl = window.URL.createObjectURL(blob);

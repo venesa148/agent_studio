@@ -34,7 +34,7 @@ export default function HomePage() {
   const fetchAgents = async () => {
     try {
       setIsLoadingAgents(true);
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
       const res = await fetch(`${apiUrl}/api/v1/agent`);
       if (res.ok) {
         const data: AgentSpecData[] = await res.json();

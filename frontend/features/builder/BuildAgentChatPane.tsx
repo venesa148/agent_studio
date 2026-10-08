@@ -141,7 +141,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
   }, [activeAgent]);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/v1/tools")
+    fetch("/api/v1/tools")
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => setDbTools(data))
       .catch((err) => console.warn("Failed to load tools from database:", err));
@@ -163,7 +163,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
     );
   };
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
   const handleSend = async (customPrompt?: string, e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -323,7 +323,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
     }
     setErrorMessage(null);
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/agent/${spec.id}/export-yaml?download=true`);
+      const res = await fetch(`/api/v1/agent/${spec.id}/export-yaml?download=true`);
       if (!res.ok) {
         throw new Error("Gagal mengunduh berkas YAML dari backend.");
       }

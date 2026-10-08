@@ -35,7 +35,7 @@ export default function EvaluationPage() {
   const fetchTestCases = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch("http://localhost:8000/api/v1/evaluation");
+      const res = await fetch("/api/v1/evaluation");
       if (res.ok) {
         const data = await res.json();
         setTestCases(data);
@@ -56,7 +56,7 @@ export default function EvaluationPage() {
     if (!inputScenario.trim()) return;
 
     try {
-      const res = await fetch("http://localhost:8000/api/v1/evaluation", {
+      const res = await fetch("/api/v1/evaluation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -80,7 +80,7 @@ export default function EvaluationPage() {
   const handleDeleteTest = async (id: string) => {
     if (!confirm("Are you sure you want to delete this test case?")) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/evaluation/${id}`, {
+      const res = await fetch(`/api/v1/evaluation/${id}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -99,7 +99,7 @@ export default function EvaluationPage() {
       );
       
       setTimeout(async () => {
-        const res = await fetch(`http://localhost:8000/api/v1/evaluation/${tc.id}`, {
+        const res = await fetch(`/api/v1/evaluation/${tc.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 export default function DeploymentsPage() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedEndpoint, setCopiedEndpoint] = useState(false);
   const [activeSnippetTab, setActiveSnippetTab] = useState<"curl" | "js" | "python">("curl");
@@ -93,7 +93,7 @@ export default function DeploymentsPage() {
     }
   };
 
-  const sampleEndpoint = deployInfo?.endpoint || "http://localhost:8080/invoke";
+  const sampleEndpoint = deployInfo?.endpoint || "/invoke";
   const apiKey = deployInfo?.api_key || "agy_live_9f82a17b8c34e91204";
 
   const handleCopy = (text: string, type: "key" | "endpoint") => {

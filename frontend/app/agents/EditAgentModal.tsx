@@ -22,7 +22,7 @@ export function EditAgentModal({ agent, isOpen, onClose, onSave }: EditAgentModa
 
   useEffect(() => {
     if (isOpen) {
-      fetch("http://localhost:8000/api/v1/tools")
+      fetch("/api/v1/tools")
         .then((res) => (res.ok ? res.json() : []))
         .then((data) => setDbTools(data))
         .catch((err) => console.warn("Failed to load tools from database:", err));
@@ -52,7 +52,7 @@ export function EditAgentModal({ agent, isOpen, onClose, onSave }: EditAgentModa
     setError(null);
 
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/agent/${formData.id}`, {
+      const res = await fetch(`/api/v1/agent/${formData.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
