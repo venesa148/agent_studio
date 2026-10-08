@@ -68,6 +68,13 @@ async def init_db():
             if "agent_id" not in cols:
                 await conn.execute(text("ALTER TABLE conversations ADD COLUMN agent_id VARCHAR(36) NULL"))
 
+        if "evaluations" in tables:
+            cols = await conn.run_sync(lambda sync_conn: [c['name'] for c in inspect(sync_conn).get_columns("evaluations")])
+            if "score" not in cols:
+                await conn.execute(text("ALTER TABLE evaluations ADD COLUMN score INTEGER NULL"))
+            if "details" not in cols:
+                await conn.execute(text("ALTER TABLE evaluations ADD COLUMN details JSON NULL"))
+
             # Pastikan MCP server lokal dan tools terdaftar di database
             import uuid
             from datetime import datetime, timezone
