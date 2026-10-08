@@ -17,6 +17,12 @@ import {
   AlertCircle,
   Wrench,
   Plus,
+  Shield,
+  Cpu,
+  Globe,
+  Terminal,
+  Copy,
+  Check,
 } from "lucide-react";
 import { AgentSpecData } from "@/app/page";
 
@@ -43,6 +49,14 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [dbTools, setDbTools] = useState<any[]>([]);
+  const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+
+  const handleCopyPrompt = (promptText: string, id: string) => {
+    if (!navigator?.clipboard) return;
+    navigator.clipboard.writeText(promptText);
+    setCopiedPromptId(id);
+    setTimeout(() => setCopiedPromptId(null), 2000);
+  };
 
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const skipClearRef = React.useRef(false);
@@ -486,113 +500,188 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
                   )}
                 </div>
 
-                {/* Generated Spec Preview Card */}
+                {/* Generated Spec Preview Card (Studio Bento Deck Layout) */}
                 {msg.spec && (
-                  <div className="ml-10 rounded-xl border border-slate-200 bg-white shadow-2xs overflow-hidden">
-                    <div className="px-3.5 py-2.5 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <FileCode2 className="w-3.5 h-3.5 text-blue-600" />
-                        <span className="text-xs font-semibold text-slate-800">
-                          {msg.spec.id && !msg.is_draft ? (
-                            <span className="flex items-center gap-1.5 text-emerald-700">
-                              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-                              Spesifikasi Tersimpan (DB: {msg.spec.id.substring(0, 8)}...)
+                  <div className="ml-10 rounded-2xl border border-slate-200/90 bg-white shadow-xs overflow-hidden transition-all">
+                    {/* Card Header Bar */}
+                    <div className="px-4 py-3 bg-gradient-to-r from-slate-50 via-white to-blue-50/40 border-b border-slate-200/80 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-7 h-7 rounded-lg bg-blue-600/10 text-blue-600 flex items-center justify-center shrink-0">
+                          <Sparkles className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-slate-800 truncate">
+                              {msg.spec.name || "Agent Tanpa Nama"}
                             </span>
-                          ) : msg.spec.id ? (
-                            <span className="flex items-center gap-1.5 text-blue-700">
-                              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block animate-pulse" />
-                              Draf Perubahan (Tersimpan di DB: {msg.spec.id.substring(0, 8)}...)
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-1.5 text-amber-700">
-                              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block animate-pulse" />
-                              Draf Pratinjau (Belum Disimpan di DB)
-                            </span>
-                          )}
-                        </span>
+                            {msg.spec.id && !msg.is_draft ? (
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                Tersimpan di DB
+                              </span>
+                            ) : msg.spec.id ? (
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200/80">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                                Draf Siap Uji
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200/80">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                Draf Baru
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <button
-                        onClick={() => setShowSpecDetails(!showSpecDetails)}
-                        className="text-slate-400 hover:text-slate-600 text-xs flex items-center gap-1"
-                      >
-                        {showSpecDetails ? (
-                          <ChevronDown className="w-3.5 h-3.5" />
-                        ) : (
-                          <ChevronRight className="w-3.5 h-3.5" />
+                      <div className="flex items-center gap-2 shrink-0">
+                        {msg.spec.id && (
+                          <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
+                            DB: {msg.spec.id.substring(0, 8)}
+                          </span>
                         )}
-                      </button>
+                        <button
+                          onClick={() => setShowSpecDetails(!showSpecDetails)}
+                          className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                          title={showSpecDetails ? "Sembunyikan spesifikasi" : "Lihat spesifikasi"}
+                        >
+                          {showSpecDetails ? (
+                            <ChevronDown className="w-4 h-4" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     {showSpecDetails && (
-                      <div className="p-3.5 space-y-2.5 text-xs">
-                        <div>
-                          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                            Nama Agent
+                      <div className="p-4 space-y-3.5">
+                        {/* 1. Agent Identity & Settings Bento Block */}
+                        <div className="rounded-xl bg-slate-50/80 p-3.5 border border-slate-200/70 space-y-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              Nama Agent
+                            </label>
+                            <input
+                              type="text"
+                              value={msg.spec.name}
+                              onChange={(e) => handleSpecChange(msg.id, "name", e.target.value)}
+                              placeholder="Nama agent..."
+                              className="w-full text-xs font-semibold text-slate-900 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-2xs hover:border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-hidden transition-all"
+                            />
                           </div>
-                          <input
-                            value={msg.spec.name}
-                            onChange={(e) => handleSpecChange(msg.id, "name", e.target.value)}
-                            className="font-semibold text-slate-900 mt-0.5 bg-transparent border-b border-dashed border-slate-300 hover:border-slate-400 focus:border-blue-500 outline-hidden w-full transition-colors"
-                          />
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              Deskripsi Peran
+                            </label>
+                            <textarea
+                              value={msg.spec.description || ""}
+                              onChange={(e) => handleSpecChange(msg.id, "description", e.target.value)}
+                              placeholder="Deskripsi peran dan cakupan agent..."
+                              className="w-full text-xs text-slate-600 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-2xs hover:border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-hidden transition-all resize-none"
+                              rows={2}
+                            />
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200/70 text-[11px] font-medium shadow-2xs">
+                              <Shield className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span className="text-slate-500 text-[10px]">Harness:</span>
+                              <span>{msg.spec.harness || "default-safe-v1"}</span>
+                            </div>
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-200/70 text-[11px] font-mono font-medium shadow-2xs">
+                              <Cpu className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                              <span className="text-slate-500 text-[10px] font-sans">Model:</span>
+                              <span>{msg.spec.model || "z-ai/glm-5.3"}</span>
+                            </div>
+                          </div>
                         </div>
 
-                        <div>
-                          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                            Deskripsi
-                          </div>
-                          <textarea
-                            value={msg.spec.description || ""}
-                            onChange={(e) => handleSpecChange(msg.id, "description", e.target.value)}
-                            className="text-slate-600 mt-0.5 bg-transparent border-b border-dashed border-slate-300 hover:border-slate-400 focus:border-blue-500 outline-hidden w-full resize-none transition-colors"
-                            rows={2}
-                          />
-                        </div>
-
-                        <div>
-                          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                            Instruksi (System Prompt)
+                        {/* 2. System Prompt Deck */}
+                        <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-2xs">
+                          <div className="px-3.5 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                              <span className="text-[11px] font-semibold text-slate-200">
+                                Instruksi Sistem (System Prompt)
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono text-slate-400">
+                                {(msg.spec.instructions || "").length} karakter
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyPrompt(msg.spec?.instructions || "", msg.id)}
+                                className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700 transition-colors cursor-pointer"
+                                title="Salin instruksi prompt ke clipboard"
+                              >
+                                {copiedPromptId === msg.id ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                    <span className="text-emerald-400 font-medium">Tersalin</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    <span>Salin</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           </div>
                           <textarea
                             value={msg.spec.instructions || ""}
                             onChange={(e) => handleSpecChange(msg.id, "instructions", e.target.value)}
-                            className="text-slate-600 mt-0.5 bg-transparent border border-dashed border-slate-300 hover:border-slate-400 focus:border-blue-500 outline-hidden w-full p-2 rounded-md text-[10px] font-mono h-24 resize-y transition-colors"
+                            placeholder="Tulis instruksi sistem untuk memandu respons dan batasan perilaku agent..."
+                            className="w-full bg-slate-900 text-emerald-300 font-mono text-[11px] leading-relaxed p-3 focus:outline-hidden resize-y min-h-[96px] placeholder-slate-600 selection:bg-cyan-900 selection:text-white"
+                            rows={4}
                           />
                         </div>
 
-                        <div>
+                        {/* 3. Capabilities & Tools Integration Hub */}
+                        <div className="rounded-xl bg-slate-50/80 p-3.5 border border-slate-200/70 space-y-3">
                           <div className="flex items-center justify-between">
-                            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                              <Wrench className="w-3 h-3 text-blue-600" />
-                              <span>Tools dari Database ({msg.spec.tools ? msg.spec.tools.length : 0})</span>
+                            <div className="flex items-center gap-2">
+                              <div className="w-5 h-5 rounded-md bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                                <Wrench className="w-3 h-3" />
+                              </div>
+                              <span className="text-xs font-semibold text-slate-800">
+                                Kapabilitas &amp; Tools Terpasang
+                              </span>
                             </div>
-                            <span className="text-[9px] text-slate-400">
-                              Katalog Database
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">
+                              {msg.spec.tools?.length || 0} Tools
                             </span>
                           </div>
 
-                          <div className="flex flex-wrap gap-1 mt-1.5">
+                          {/* Active Tools Badges */}
+                          <div className="flex flex-wrap gap-1.5 min-h-[28px] items-center">
                             {msg.spec.tools && msg.spec.tools.length > 0 ? (
                               msg.spec.tools.map((tool) => {
                                 const toolObj = dbTools.find((t) => t.name === tool);
                                 const isMcp = toolObj?.source_type === "mcp";
+                                const isApi = toolObj?.source_type === "api" || toolObj?.source_type === "web_api";
                                 return (
                                   <span
                                     key={tool}
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-mono text-[11px] ${
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-mono border shadow-2xs transition-all ${
                                       isMcp
-                                        ? "bg-purple-50 text-purple-700 border-purple-200"
-                                        : "bg-blue-50 text-blue-700 border-blue-200/60"
+                                        ? "bg-purple-50 text-purple-700 border-purple-200/80 hover:border-purple-300"
+                                        : isApi
+                                        ? "bg-cyan-50 text-cyan-800 border-cyan-200/80 hover:border-cyan-300"
+                                        : "bg-blue-50 text-blue-700 border-blue-200/80 hover:border-blue-300"
                                     }`}
                                     title={toolObj?.description || tool}
                                   >
                                     <span className="text-[8px] uppercase px-1 py-0.2 rounded bg-black/5 font-sans font-bold">
                                       {toolObj?.source_type || "tool"}
                                     </span>
-                                    <span>{tool}()</span>
+                                    <span className="font-semibold">{tool}()</span>
                                     <button
                                       type="button"
                                       onClick={() => handleToggleTool(msg.id, tool)}
-                                      className="text-slate-400 hover:text-rose-600 font-bold ml-0.5 cursor-pointer"
+                                      className="text-slate-400 hover:text-rose-600 font-bold ml-0.5 p-0.5 hover:bg-black/5 rounded transition-colors cursor-pointer"
                                       title="Hapus tool ini dari agent"
                                     >
                                       ✕
@@ -601,38 +690,45 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
                                 );
                               })
                             ) : (
-                              <span className="text-slate-400 text-[11px] italic">
-                                Belum ada tool dipilih dari database.
+                              <span className="text-slate-400 text-xs italic py-1">
+                                Belum ada tool yang dipasang ke agent ini.
                               </span>
                             )}
                           </div>
 
-                          {/* Opsi penambahan tools aktif yang tersedia dari database */}
+                          {/* Available Tools Catalog from Database */}
                           {dbTools.length > 0 && (
-                            <div className="mt-2 pt-2 border-t border-slate-100">
-                              <span className="text-[10px] text-slate-400 block mb-1">
-                                Tools aktif di database (klik untuk tambah / hapus):
+                            <div className="pt-2 border-t border-slate-200/60 space-y-1.5">
+                              <span className="text-[10px] text-slate-500 font-medium block">
+                                Katalog Tools Database (Klik untuk pasang / lepas):
                               </span>
-                              <div className="flex flex-wrap gap-1">
+                              <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
                                 {dbTools.map((dbTool) => {
                                   const isSelected = msg.spec?.tools?.includes(dbTool.name);
                                   const isMcp = dbTool.source_type === "mcp";
+                                  const isApi = dbTool.source_type === "api" || dbTool.source_type === "web_api";
                                   return (
                                     <button
                                       key={dbTool.id || dbTool.name}
                                       type="button"
                                       onClick={() => handleToggleTool(msg.id, dbTool.name)}
-                                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-all cursor-pointer flex items-center gap-1 ${
+                                      className={`px-2.5 py-1 rounded-lg text-[10px] font-mono border transition-all cursor-pointer flex items-center gap-1.5 ${
                                         isSelected
                                           ? isMcp
                                             ? "bg-purple-600 text-white border-purple-600 font-semibold shadow-2xs"
+                                            : isApi
+                                            ? "bg-cyan-600 text-white border-cyan-600 font-semibold shadow-2xs"
                                             : "bg-blue-600 text-white border-blue-600 font-semibold shadow-2xs"
-                                          : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                                          : "bg-white text-slate-600 border-slate-200/80 hover:bg-slate-100 hover:border-slate-300 shadow-2xs"
                                       }`}
                                       title={dbTool.description || dbTool.name}
                                     >
-                                      <span>{isSelected ? "✓" : "+"}</span>
-                                      {isMcp && <span className="text-[8px] px-1 rounded bg-black/10 uppercase">MCP</span>}
+                                      <span className="font-bold text-xs">{isSelected ? "✓" : "+"}</span>
+                                      {isMcp ? (
+                                        <span className="text-[8px] px-1 rounded bg-black/10 uppercase font-sans">MCP</span>
+                                      ) : isApi ? (
+                                        <span className="text-[8px] px-1 rounded bg-black/10 uppercase font-sans">API</span>
+                                      ) : null}
                                       <span>{dbTool.name}</span>
                                     </button>
                                   );
@@ -642,63 +738,54 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
                           )}
                         </div>
 
-                        <div className="flex items-center justify-between pt-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-slate-400">Harness:</span>
-                            <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-medium">
-                              {msg.spec.harness}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-slate-400">Model:</span>
-                            <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-mono">
-                              {msg.spec.model}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
-                          <div className="text-[11px] text-slate-400">
+                        {/* 4. Action Toolbar */}
+                        <div className="pt-1 flex items-center justify-between gap-3">
+                          <div className="text-xs">
                             {msg.spec.id && !msg.is_draft ? (
-                              <span className="text-emerald-600 flex items-center gap-1 font-medium">
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Aktif di Test Chat
+                              <span className="text-emerald-700 flex items-center gap-1.5 font-medium">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                                Aktif &amp; tersinkronisasi di Test Chat
                               </span>
                             ) : msg.spec.id ? (
-                              <span className="text-blue-600 text-[10px] flex items-center gap-1">
-                                ℹ️ Perubahan belum diterapkan ke database
+                              <span className="text-blue-700 flex items-center gap-1.5 font-medium text-xs">
+                                <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" />
+                                Perubahan belum disimpan ke database
                               </span>
                             ) : (
-                              <span className="text-amber-600 text-[10px] flex items-center gap-1">
-                                ℹ️ Draf belum disimpan di database
+                              <span className="text-amber-700 flex items-center gap-1.5 font-medium text-xs">
+                                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                                Draf baru belum disimpan ke database
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+
+                          <div className="flex items-center gap-2 shrink-0">
                             {msg.spec.id && (
                               <button
                                 type="button"
                                 onClick={() => handleExportYaml(msg.spec!)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium transition-colors shadow-2xs cursor-pointer"
+                                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 shadow-2xs text-xs font-semibold transition-all cursor-pointer hover:border-slate-300"
                                 title="Unduh berkas spesifikasi deklaratif .yaml"
                               >
-                                <FileCode2 className="w-3.5 h-3.5" />
+                                <FileCode2 className="w-3.5 h-3.5 text-emerald-600" />
                                 Export .YAML
                               </button>
                             )}
                             <button
                               type="button"
                               onClick={() => handleSaveSpec(msg.spec!)}
-                              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-white text-xs font-medium transition-all shadow-2xs cursor-pointer ${msg.spec.id && !msg.is_draft
-                                  ? "bg-slate-700 hover:bg-slate-800"
-                                  : "bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300 ring-offset-1 font-semibold"
-                                }`}
+                              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-xs font-semibold transition-all shadow-2xs cursor-pointer ${
+                                msg.spec.id && !msg.is_draft
+                                  ? "bg-slate-800 hover:bg-slate-900"
+                                  : "bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300 ring-offset-1"
+                              }`}
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <CheckCircle2 className="w-4 h-4" />
                               {msg.spec.id && !msg.is_draft
                                 ? "Simpan Perubahan"
                                 : msg.spec.id
-                                  ? "✅ Terapkan Perubahan ke DB"
-                                  : "✅ Terapkan & Simpan ke DB"}
+                                  ? "Terapkan Perubahan ke DB"
+                                  : "Terapkan & Simpan ke DB"}
                             </button>
                           </div>
                         </div>

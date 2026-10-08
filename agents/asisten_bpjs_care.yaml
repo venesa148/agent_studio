@@ -1,0 +1,309 @@
+spec_version: v1.0
+metadata:
+  id: 8f9207a3-f3af-4404-baa1-4b3edcf5a4af
+  name: Asisten BPJS Care
+  slug: asisten_bpjs_care
+  description: 'Agent panduan pasien BPJS Kesehatan: triase keluhan awal, verifikasi
+    kepesertaan BPJS dan surat rujukan, pencarian rumah sakit rekanan beserta jadwal
+    dokter spesialis, hingga booking antrean pemeriksaan.'
+  status: draft
+  created_at: '2026-10-08T10:16:28.119860'
+  updated_at: '2026-10-08T10:16:28.119860'
+configuration:
+  model: z-ai/glm-5.3
+  harness: default-safe-v1
+tools:
+- classify_complaint
+- check_bpjs
+- get_participant_status
+- get_referral_status
+- search_hospital
+- search_hospitals
+- hospital_finder
+- search_doctors
+- find_specialist
+- create_appointment
+- get_appointment
+- search_web
+mcp_servers:
+- 3144f9ba-abc1-41de-a8b6-ec0c61369c72
+- b944c983-b566-40e6-80f2-9a188d02be06
+instructions: |-
+  PERAN: Kamu adalah 'Asisten BPJS Care', panduan digital untuk pasien BPJS Kesehatan di Indonesia.
+
+  SOP ALUR KERJA:
+  1. TRIASE AWAL: Saat pasien menyampaikan keluhan, gunakan tool 'classify_complaint' untuk menentukan tingkat urgensi (EMERGENCY, NEED_FURTHER_CARE, INFORMATION_ONLY) dan poliklinik kandidat. Jika hasil EMERGENCY, segera sarankan pasien menuju IGD terdekat dan berikan nomor darurat 119; jangan menunda dengan proses administrasi.
+  2. VERIFIKASI KE PESERTAAN: Gunakan 'check_bpjs' atau 'get_participant_status' untuk memverifikasi status kepesertaan JKN/BPJS pasien sebelum melanjutkan ke tahap pencarian layanan.
+  3. CEK RUJUKAN: Jika pasien memerlukan layanan rujukan, gunakan 'get_referral_status' untuk memastikan nomor rujukan valid dan masih aktif.
+  4. CARI FASILITAS & DOKTER: Gunakan 'search_hospital'/'search_hospitals'/'hospital_finder' untuk mencari rumah sakit rekanan BPJS sesuai kota/layanan, lalu gunakan 'search_doctors'/'find_specialist' untuk mencari jadwal dokter spesialis yang sesuai poliklinik kandidat.
+  5. BOOKING ANTREAN: Sebelum booking dengan 'create_appointment', WAJIB konfirmasi eksplisit kepada pasien (tampilkan rumah sakit, dokter, tanggal/jam). Setelah booking, gunakan 'get_appointment' untuk memberikan nomor antrean dan status booking.
+
+  GAYA BAHASA: Bahasa Indonesia yang ramah, empatik, sederhana, dan mudah dipahami pasien awam. Hindari istilah medis rumit tanpa penjelasan.
+
+  BATASAN KEAMANAN:
+  - JANGAN PERNAH memberikan diagnosis medis, dosis obat, atau saran pengobatan. Fokus pada panduan administratif dan navigasi layanan.
+  - Untuk keluhan gawat darurat, prioritaskan keselamatan: arahkan ke IGD terdekat dan layanan darurat.
+  - Jangan pernah meminta atau menyimpan data sensitif di luar keperluan verifikasi (nomor BPJS hanya untuk pengecekan via tool resmi).
+
+  ATURAN PENGGUNAAN TOOL:
+  - Gunakan HANYA tool yang tersedia; jangan mengarang data rumah sakit, dokter, atau status BPJS.
+  - Jika data tidak ditemukan, sampaikan dengan jujur dan sarankan menghubungi call center BPJS 1500400 atau datang langsung ke faskes.
+  - Gunakan 'search_web' hanya jika pasien membutuhkan informasi umum/berita terkini seputar kesehatan atau kebijakan BPJS.
+flow:
+  entry_node: main_step
+  nodes:
+  - id: main_step
+    type: llm_step
+    instruction: Tanggapi dan bantu kebutuhan pengguna dengan memanfaatkan tools yang
+      relevan secara akurat sesuai instruksi.
+    next: selesai
+  - id: selesai
+    type: end
+tools_required:
+- tool_ref: classify_complaint
+  tool_name: classify_complaint
+  purpose: Triage keluhan klinis (EMERGENCY, NEED_FURTHER_CARE, INFORMATION_ONLY)
+    dan mapping poli kandidat
+  source_type: builtin
+  mcp_server_name: JKN Care Services MCP
+  endpoint: internal://triage/classify_complaint
+  method: INTERNAL
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      complaint:
+        type: string
+        description: Keluhan, gejala kesehatan, atau pertanyaan yang disampaikan pengguna
+    required:
+    - complaint
+- tool_ref: check_bpjs
+  tool_name: check_bpjs
+  purpose: Cek status kepesertaan BPJS dan eligibility layanan
+  source_type: web_api
+  mcp_server_name: JKN Care Services MCP
+  endpoint: https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/check-bpjs
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      bpjs_id:
+        type: string
+        description: 'Nomor kartu BPJS atau ID peserta (contoh: 000123456789)'
+    required:
+    - bpjs_id
+- tool_ref: get_participant_status
+  tool_name: get_participant_status
+  purpose: Cek status kepesertaan JKN/BPJS dan kelayakan administrasi peserta
+  source_type: mcp
+  mcp_server_name: JKN Care Services MCP
+  endpoint: https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/check-bpjs
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      participant_id:
+        type: string
+        description: 'Nomor kartu BPJS/JKN atau NIK peserta (contoh: 000123456789)'
+    required:
+    - participant_id
+- tool_ref: get_referral_status
+  tool_name: get_referral_status
+  purpose: Cek status dan validitas nomor rujukan faskes BPJS
+  source_type: web_api
+  mcp_server_name: JKN Care Services MCP
+  endpoint: https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/referral-status
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      referral_id:
+        type: string
+        description: 'Nomor surat rujukan peserta BPJS (contoh: RJ-001 atau RJ-9999)'
+    required:
+    - referral_id
+- tool_ref: search_hospital
+  tool_name: search_hospital
+  purpose: Cari data rumah sakit rekanan BPJS dan ketersediaan layanan faskes
+  source_type: web_api
+  mcp_server_name: JKN Care Services MCP
+  endpoint: https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/hospitals
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      city:
+        type: string
+        description: 'Nama kota lokasi rumah sakit (contoh: Jakarta, Bandung, Surabaya)'
+      bpjs_only:
+        type: boolean
+        description: Hanya tampilkan rumah sakit rekanan BPJS
+        default: true
+    required:
+    - city
+- tool_ref: search_hospitals
+  tool_name: search_hospitals
+  purpose: Cari direktori rumah sakit rekanan BPJS berdasarkan kota/layanan via Web
+    API
+  source_type: mcp
+  mcp_server_name: JKN Care Services MCP
+  endpoint: https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/hospitals
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      city:
+        type: string
+        description: 'Nama kota fasilitas kesehatan (contoh: Jakarta, Bandung, Surabaya)'
+      service:
+        type: string
+        description: 'Poli atau layanan medis yang dicari (contoh: Orthopaedi, Penyakit
+          Dalam)'
+    required:
+    - city
+- tool_ref: hospital_finder
+  tool_name: hospital_finder
+  purpose: Cari data rumah sakit terdekat dan status faskes BPJS
+  source_type: mcp
+  mcp_server_name: notion
+  endpoint: https://api.notion.com/mcp/api/v1/mock-bpjs/hospitals
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    properties:
+      bpjs_only:
+        default: true
+        type: boolean
+      city:
+        description: Nama kota
+        type: string
+    required:
+    - city
+    type: object
+- tool_ref: search_doctors
+  tool_name: search_doctors
+  purpose: Cari dokter spesialis dan ketersediaan jadwal praktik di rumah sakit via
+    Web API
+  source_type: mcp
+  mcp_server_name: JKN Care Services MCP
+  endpoint: https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/specialists
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      hospital_name:
+        type: string
+        description: Nama rumah sakit tujuan
+      specialty:
+        type: string
+        description: 'Spesialisasi atau poli dokter (contoh: Orthopaedi, Jantung,
+          Anak)'
+    required:
+    - hospital_name
+    - specialty
+- tool_ref: find_specialist
+  tool_name: find_specialist
+  purpose: Cari dokter spesialis berdasarkan poliklinik dan kota
+  source_type: web_api
+  mcp_server_name: null
+  endpoint: https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/specialists
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      specialty:
+        type: string
+        description: 'Poli atau keahlian spesialis dokter (contoh: Penyakit Dalam,
+          Jantung, Mata, Anak)'
+      city:
+        type: string
+        description: Nama kota lokasi fasilitas kesehatan
+    required:
+    - specialty
+- tool_ref: create_appointment
+  tool_name: create_appointment
+  purpose: Booking janji temu/antrean faskes BPJS setelah konfirmasi eksplisit dari
+    user via Web API
+  source_type: mcp
+  mcp_server_name: JKN Care Services MCP
+  endpoint: https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/appointments
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      patient_name:
+        type: string
+        description: Nama lengkap pasien
+      hospital_name:
+        type: string
+        description: Nama rumah sakit tujuan
+      doctor_name:
+        type: string
+        description: Nama dokter yang dipilih
+      date:
+        type: string
+        description: 'Tanggal appointment (format: YYYY-MM-DD)'
+      time_slot:
+        type: string
+        description: 'Slot jam janji temu (contoh: 09:00 - 10:00 WIB)'
+    required:
+    - patient_name
+    - hospital_name
+    - doctor_name
+    - date
+- tool_ref: get_appointment
+  tool_name: get_appointment
+  purpose: Cek status booking janji temu dan nomor antrean pasien via Web API
+  source_type: mcp
+  mcp_server_name: JKN Care Services MCP
+  endpoint: https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/appointments
+  method: GET
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      booking_id:
+        type: string
+        description: Nomor booking atau kode tiket antrean
+    required:
+    - booking_id
+- tool_ref: search_web
+  tool_name: search_web
+  purpose: Search the web for real-time information
+  source_type: mcp
+  mcp_server_name: null
+  endpoint: https://duckduckgo.com
+  method: GET
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    properties:
+      query:
+        type: string
+    type: object
+guardrails:
+  max_turns: 15
+  strict_grounding: true
+  disallowed_behaviors:
+  - memberi diagnosis pasti tanpa dokter
+  - merekomendasikan obat atau dosis spesifik
+  - mengabaikan keluhan yang mengindikasikan kondisi darurat

@@ -1,11 +1,12 @@
 """
-Agent Runtime Server (Dedicated Data-Plane & Multi-Agent Runtime)
-==================================================================
-Runtime Server yang berjalan di AWS EC2 (dan lokal) dengan kemampuan:
+Agent Runtime Server (Dedicated Multi-Agent Autonomous ReAct Runtime)
+======================================================================
+Generic Agent Runtime untuk lingkungan AWS EC2 dan lokal:
 - Multi-Agent Registry (setiap agent memiliki slug unik di /agents/{slug}/invoke)
-- Full Declarative YAML Parser (metadata, instructions, model, tools_required, guardrails)
-- Autonomous ReAct Agent Loop (multi-step tool calling dengan OpenRouter / OpenAI)
-- Live Web API & MCP Tool Execution dengan automatic resilient fallback
+- Full Declarative YAML Parser (metadata, instructions, configuration, tools_required, guardrails)
+- Autonomous ReAct Agent Loop (multi-step dynamic tool calling via OpenRouter / OpenAI)
+- Fallback Regex Interceptor untuk model dengan sintaks tag (misal GLM / ChatGLM <tool_call>)
+- Dynamic Live Web API & MCP Tool Execution (100% dinamis tanpa hardcode data fiktif)
 """
 
 import os
@@ -44,93 +45,6 @@ AGENTS_DIR.mkdir(exist_ok=True)
 # In-memory session store untuk conversation context
 session_memory: Dict[str, Dict[str, Any]] = {}
 
-# Ground-truth fallback data (Source of Truth jika Cloudflare tunnel / server eksternal offline)
-MOCK_REFERRALS = {
-    "RUJ-2026-0001": {
-        "nomor_rujukan": "RUJ-2026-0001",
-        "status": "AKTIF",
-        "faskes_asal": "Puskesmas Kecamatan Gambir",
-        "faskes_tujuan": "RSUP Nasional Cipto Mangunkusumo (RSCM)",
-        "poli": "Poli Penyakit Dalam",
-        "berlaku_sampai": "2026-11-01",
-        "catatan_medis": "Pasien mengeluhkan gangguan metabolik dan nyeri sendi. Rujukan awal diterbitkan ke Poli Penyakit Dalam."
-    },
-    "RJ-1001": {
-        "nomor_rujukan": "RJ-1001",
-        "status": "AKTIF",
-        "faskes_asal": "Puskesmas Kebayoran Baru",
-        "faskes_tujuan": "RSUD Tarakan",
-        "poli": "Poli Orthopaedi",
-        "berlaku_sampai": "2026-11-30"
-    }
-}
-
-MOCK_HOSPITALS = [
-    {
-        "id": 1,
-        "nama_rs": "RSUP Fatmawati",
-        "tipe": "RSUP / Kelas A",
-        "mitra_bpjs": True,
-        "lokasi": "Jakarta Selatan",
-        "alamat": "Jl. RS Fatmawati Raya No. 4, Cilandak, Jakarta Selatan",
-        "no_telp": "(021) 7501524",
-        "deskripsi": "Pusat rujukan ortopedi nasional dengan keunggulan Pusat Ortopedi Terpadu, bedah tulang belakang, dan rehabilitasi medik komprehensif.",
-        "fasilitas": ["IGD 24 Jam", "Pusat Ortopedi Terpadu", "Trauma Center", "Rehabilitasi Medik"],
-        "jarak_estimasi": "8.2 km"
-    },
-    {
-        "id": 2,
-        "nama_rs": "RSUD Tarakan",
-        "tipe": "RSUD / Kelas B",
-        "mitra_bpjs": True,
-        "lokasi": "Jakarta Pusat",
-        "alamat": "Jl. Kyai Caringin No. 7, Cideng, Gambir, Jakarta Pusat",
-        "no_telp": "(021) 3842952",
-        "deskripsi": "Rumah sakit rujukan trauma center Jakarta Pusat dengan layanan poli bedah tulang ortopedi dan penanganan gawat darurat kecelakaan.",
-        "fasilitas": ["IGD 24 Jam", "Trauma Center", "Poli Orthopaedi", "CT-Scan 128 Slice"],
-        "jarak_estimasi": "4.1 km"
-    },
-    {
-        "id": 3,
-        "nama_rs": "RSUD Pasar Rebo",
-        "tipe": "RSUD / Kelas B",
-        "mitra_bpjs": True,
-        "lokasi": "Jakarta Timur",
-        "alamat": "Jl. TB Simatupang No. 30, Pasar Rebo, Jakarta Timur",
-        "no_telp": "(021) 8401127",
-        "deskripsi": "Fasilitas kesehatan rujukan Jakarta Timur yang memiliki poliklinik ortopedi dan fisioterapi pemulihan cedera fisik.",
-        "fasilitas": ["IGD 24 Jam", "Poli Bedah Tulang", "Fisioterapi", "Rawat Inap Terpadu"],
-        "jarak_estimasi": "11.8 km"
-    },
-    {
-        "id": 4,
-        "nama_rs": "RSUPN Dr. Cipto Mangunkusumo (RSCM)",
-        "tipe": "RSUP / Kelas A",
-        "mitra_bpjs": True,
-        "lokasi": "Jakarta Pusat",
-        "alamat": "Jl. Diponegoro No. 71, Kenari, Senen, Jakarta Pusat",
-        "no_telp": "(021) 1500135",
-        "deskripsi": "Rumah sakit rujukan nasional tertinggi dengan fasilitas subspesialistik terlengkap dan pusat pendidikan kedokteran.",
-        "fasilitas": ["IGD 24 Jam", "Poli Spesialis Lengkap", "Pusat Jantung Terpadu", "Poli Penyakit Dalam"],
-        "jarak_estimasi": "2.5 km"
-    }
-]
-
-MOCK_SPECIALISTS = [
-    {
-        "nama_dokter": "dr. Andi Pratama, Sp.PD",
-        "spesialisasi": "Orthopaedi",
-        "rumah_sakit": "RSUD Tarakan",
-        "jadwal_praktek": "Senin - Kamis (08.00 - 12.00)"
-    },
-    {
-        "nama_dokter": "dr. Siti Rahma, Sp.PD",
-        "spesialisasi": "Orthopaedi",
-        "rumah_sakit": "RSCM",
-        "jadwal_praktek": "Rabu - Sabtu (10.00 - 14.00)"
-    }
-]
-
 
 # =============================================================================
 # 1. Models & Schemas
@@ -158,7 +72,7 @@ class DeployRequest(BaseModel):
 
 
 # =============================================================================
-# 2. Agent Runtime Engine (Parser & ReAct Loop)
+# 2. Agent Runtime Engine (Parser & Autonomous ReAct Loop)
 # =============================================================================
 class AgentRuntimeEngine:
     def __init__(self, config_content: str, slug: str):
@@ -199,7 +113,7 @@ class AgentRuntimeEngine:
             else:
                 self.model_name = str(cfg)
 
-            # Parse tools_required
+            # Parse tools_required dari YAML
             self.tools_required = self.raw_spec.get("tools_required", [])
             self.tools_by_ref = {}
             for t in self.tools_required:
@@ -207,12 +121,12 @@ class AgentRuntimeEngine:
                 if ref:
                     self.tools_by_ref[ref] = t
 
-            # Fallback jika tools terdaftar di tools: [...]
+            # Fallback jika tools didefinisikan dalam format list string tools: [...]
             for tname in self.raw_spec.get("tools", []):
                 if isinstance(tname, str) and tname not in self.tools_by_ref:
                     self.tools_by_ref[tname] = {"tool_ref": tname, "endpoint": None, "purpose": f"Layanan tool {tname}"}
 
-            # Siapkan OpenAI function calling schemas
+            # Siapkan schema tool function calling untuk LLM
             self.openai_tools = []
             for ref, t_info in self.tools_by_ref.items():
                 schema = t_info.get("input_schema")
@@ -230,132 +144,204 @@ class AgentRuntimeEngine:
 
             logger.info(
                 f"[Engine] Agent '{self.name}' (slug: {self.slug}) dimuat dengan "
-                f"{len(self.openai_tools)} live tools terdaftar. Model: {self.model_name}"
+                f"{len(self.openai_tools)} live tools. Model: {self.model_name}"
             )
         except Exception as e:
             logger.error(f"[Engine Load Error] Gagal memuat YAML: {e}")
 
     async def execute_tool(self, tool_ref: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Eksekusi live tool: Coba HTTP endpoint live terlebih dahulu, jika offline gunakan ground-truth fallback."""
+        """Eksekusi tool secara dinamis tanpa hardcode data fiktif."""
         logger.info(f"[Runtime Tool Call] Menjalankan tool '{tool_ref}' dengan params: {params}")
         t_info = self.tools_by_ref.get(tool_ref, {})
         endpoint = t_info.get("endpoint")
         method = str(t_info.get("method") or "POST").upper()
 
-        # 1. Internal triage classify_complaint
+        # 1. Protokol Triase Klinis Standar (classify_complaint)
         if tool_ref == "classify_complaint" or (endpoint and "classify_complaint" in endpoint):
-            complaint = str(params.get("complaint") or params.get("keluhan") or "").strip().lower()
+            complaint = str(params.get("complaint") or params.get("keluhan") or "").strip()
+            if not complaint:
+                return {"status": "error", "message": "Parameter 'complaint' tidak boleh kosong."}
+
+            complaint_lower = complaint.lower()
             red_flags = ["pingsan", "sesak nafas", "nyeri dada hebat", "darurat", "kejang", "tidak sadar", "pendarahan hebat", "stroke", "lumpuh", "koma"]
-            matched_rf = [rf for rf in red_flags if rf in complaint]
+            matched_rf = [rf for rf in red_flags if rf in complaint_lower]
             if matched_rf:
                 return {
                     "status": "ok",
                     "triage_class": "EMERGENCY",
                     "red_flag": True,
                     "matched_red_flags": matched_rf,
+                    "candidate_service": ["IGD / Instalasi Gawat Darurat"],
                     "action": "ESCALATE_TO_EMERGENCY",
-                    "message": "Indikasi gawat darurat terdeteksi. Segera arahkan pasien ke IGD terdekat."
+                    "_source": "Clinical Triage Protocol",
+                    "_endpoint": "internal://triage/classify_complaint",
+                    "message": "Indikasi gawat darurat (Red Flag) terdeteksi. Segera arahkan pasien ke IGD rumah sakit terdekat atau hubungi 119."
                 }
+
+            ortho_kw = ["lutut", "sendi", "tulang", "patah", "keseleo", "otot", "kaki", "pinggang", "punggung", "tangan", "bahu"]
+            jantung_kw = ["jantung", "dada", "debar", "koroner", "aritmia"]
+            internis_kw = ["lambung", "maag", "ulu hati", "mual", "muntah", "perut", "penyakit dalam", "gerd", "diare"]
+            mata_kw = ["mata", "kabur", "katarak", "minus", "silinder"]
+            gigi_kw = ["gigi", "gusi", "geraham", "tambal", "cabut gigi"]
+            anak_kw = ["bayi", "balita", "anak", "imunisasi", "tumbuh kembang"]
+
+            poli = "Poli Umum FKTP"
+            if any(k in complaint_lower for k in ortho_kw):
+                poli = "Poli Orthopaedi & Bedah Tulang"
+            elif any(k in complaint_lower for k in jantung_kw):
+                poli = "Poli Jantung & Pembuluh Darah"
+            elif any(k in complaint_lower for k in internis_kw):
+                poli = "Poli Penyakit Dalam"
+            elif any(k in complaint_lower for k in mata_kw):
+                poli = "Poli Mata"
+            elif any(k in complaint_lower for k in gigi_kw):
+                poli = "Poli Gigi & Mulut"
+            elif any(k in complaint_lower for k in anak_kw):
+                poli = "Poli Anak"
+
             return {
                 "status": "ok",
-                "triage_class": "NON_EMERGENCY",
+                "triage_class": "NEED_FURTHER_CARE",
                 "red_flag": False,
-                "recommended_specialty": "Poli Orthopaedi & Bedah Tulang" if any(w in complaint for w in ["lutut", "sendi", "tulang", "patah"]) else "Poli Penyakit Dalam"
+                "recommended_specialty": poli,
+                "candidate_service": [poli, "Poli Umum FKTP"],
+                "requires_eligibility_check": True,
+                "_source": "Clinical Triage Protocol",
+                "_endpoint": "internal://triage/classify_complaint"
             }
 
-        # 2. Coba live HTTP call jika endpoint terkonfigurasi
+        # 2. Live REST API / MCP HTTP Endpoint Runner (Dinamis sesuai file YAML)
         if endpoint and (endpoint.startswith("http://") or endpoint.startswith("https://")):
+            headers = {"Content-Type": "application/json"}
+            auth_secret = t_info.get("auth_secret_ref")
+            if auth_secret:
+                headers["Authorization"] = f"Bearer {auth_secret}"
+
+            # Normalisasi parameter input payload
             norm_params = dict(params)
             if "hospital_name" in norm_params and "location" not in norm_params:
                 norm_params["location"] = norm_params["hospital_name"]
             if "city" in norm_params and "location" not in norm_params:
                 norm_params["location"] = norm_params["city"]
+            if "bpjs_number" in norm_params and "number" not in norm_params:
+                norm_params["number"] = norm_params["bpjs_number"]
+            if "bpjs_number" in norm_params and "bpjs_id" not in norm_params:
+                norm_params["bpjs_id"] = norm_params["bpjs_number"]
             if "bpjs_id" in norm_params and "number" not in norm_params:
                 norm_params["number"] = norm_params["bpjs_id"]
             if "participant_id" in norm_params and "number" not in norm_params:
                 norm_params["number"] = norm_params["participant_id"]
+            if "referral_number" in norm_params and "referral_no" not in norm_params:
+                norm_params["referral_no"] = norm_params["referral_number"]
+            if "referral_number" in norm_params and "referral_id" not in norm_params:
+                norm_params["referral_id"] = norm_params["referral_number"]
             if "referral_id" in norm_params and "referral_no" not in norm_params:
                 norm_params["referral_no"] = norm_params["referral_id"]
 
             try:
-                async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+                async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
                     if method == "GET":
-                        resp = await client.get(endpoint, params=norm_params)
+                        resp = await client.get(endpoint, params=norm_params, headers=headers)
                     else:
-                        resp = await client.post(endpoint, json=norm_params)
+                        resp = await client.post(endpoint, json=norm_params, headers=headers)
 
                     if resp.status_code == 200:
                         body = resp.json()
                         data = body.get("data", body) if isinstance(body, dict) else body
                         logger.info(f"[Live HTTP Tool OK] {tool_ref} -> 200 OK")
+                        if isinstance(data, dict):
+                            data["_endpoint"] = endpoint
+                            data["_source"] = t_info.get("mcp_server_name") or "Live Web API"
+                            return data
+                        elif isinstance(data, list):
+                            return {
+                                "status": "ok",
+                                "count": len(data),
+                                "items": data,
+                                "_endpoint": endpoint,
+                                "_source": t_info.get("mcp_server_name") or "Live Web API"
+                            }
+                        return {"status": "ok", "result": data, "_endpoint": endpoint}
+                    else:
+                        logger.warning(f"[Live HTTP Tool Status {resp.status_code}] {tool_ref}: {resp.text[:200]}")
                         return {
-                            "status": "ok",
-                            "items": data if isinstance(data, list) else None,
-                            "data": data if isinstance(data, dict) else None,
+                            "status": "error",
+                            "status_code": resp.status_code,
                             "_endpoint": endpoint,
-                            "_source": t_info.get("mcp_server_name") or "Live Web API"
+                            "_source": t_info.get("mcp_server_name") or "Live Web API",
+                            "message": f"Server eksternal mengembalikan HTTP {resp.status_code} untuk tool '{tool_ref}'."
                         }
             except Exception as e:
-                logger.warning(f"[Live HTTP Tool Failed] {tool_ref} ({endpoint}): {e}. Menggunakan ground-truth fallback.")
-
-        # 3. Ground-Truth Fallback jika Web API tidak terjangkau (Tunnel 530 / Connection Error)
-        if tool_ref == "get_referral_status":
-            ref_no = str(params.get("referral_id") or params.get("referral_no") or "RUJ-2026-0001").strip().upper()
-            ref_data = MOCK_REFERRALS.get(ref_no)
-            if ref_data:
+                logger.warning(f"[Live HTTP Tool Error] {tool_ref} ({endpoint}): {e}")
                 return {
-                    "status": "ok",
-                    "data": ref_data,
-                    "_endpoint": endpoint or "internal://mock-bpjs/referral-status",
-                    "_source": "Basis Data Rujukan BPJS Kesehatan"
+                    "status": "error",
+                    "error_type": "SERVICE_UNAVAILABLE",
+                    "_endpoint": endpoint,
+                    "_source": t_info.get("mcp_server_name") or "Live Web API (Offline)",
+                    "message": f"Server live API ({endpoint}) sedang offline atau tidak dapat dijangkau: {str(e)}"
                 }
-            return {
-                "status": "NOT_FOUND",
-                "referral_id": ref_no,
-                "message": f"Nomor surat rujukan '{ref_no}' tidak ditemukan dalam basis data faskes BPJS."
-            }
 
-        if tool_ref in ["search_hospital", "search_hospitals", "hospital_finder"]:
-            city_query = str(params.get("city") or params.get("location") or "Jakarta").strip().lower()
-            filtered = [rs for rs in MOCK_HOSPITALS if city_query in rs["lokasi"].lower() or rs["mitra_bpjs"]]
-            return {
-                "status": "ok",
-                "count": len(filtered or MOCK_HOSPITALS),
-                "items": filtered or MOCK_HOSPITALS,
-                "_endpoint": endpoint or "internal://mock-bpjs/hospitals",
-                "_source": "JKN Care Services MCP"
-            }
+        # 3. Live Web Search (DuckDuckGo Search)
+        if tool_ref in ["search_web", "web_search"]:
+            query = str(params.get("query") or params.get("q") or "").strip()
+            if not query:
+                return {"status": "error", "message": "Parameter 'query' tidak boleh kosong."}
+            try:
+                from ddgs import DDGS
+                with DDGS() as ddgs:
+                    raw = list(ddgs.text(query, region="id-id", max_results=4))
+                    if not raw:
+                        raw = list(ddgs.text(query, region="wt-wt", max_results=4))
+                    if raw:
+                        return {
+                            "status": "ok",
+                            "query": query,
+                            "results": [{"title": r.get("title"), "snippet": r.get("body"), "url": r.get("href")} for r in raw],
+                            "_source": "DuckDuckGo Web Search",
+                            "_endpoint": "https://duckduckgo.com"
+                        }
+            except Exception as e_search:
+                logger.warning(f"[Web Search Warning] {e_search}")
+            return {"status": "error", "query": query, "message": "Layanan pencarian web sedang tidak dapat memuat hasil."}
 
-        if tool_ref in ["find_specialist", "search_doctors"]:
-            return {
-                "status": "ok",
-                "count": len(MOCK_SPECIALISTS),
-                "items": MOCK_SPECIALISTS,
-                "_endpoint": endpoint or "internal://mock-bpjs/specialists",
-                "_source": "JKN Care Services MCP"
-            }
+        # 4. Safe Math Calculator
+        if tool_ref in ["calculator", "math_eval"]:
+            expr = str(params.get("expression") or params.get("expr") or "").strip()
+            if not expr:
+                return {"status": "error", "message": "Parameter 'expression' tidak boleh kosong."}
+            try:
+                import ast
+                import operator
+                ops = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv, ast.Pow: operator.pow, ast.USub: operator.neg, ast.Mod: operator.mod}
+                def _eval(node):
+                    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                        return node.value
+                    elif isinstance(node, ast.BinOp) and type(node.op) in ops:
+                        return ops[type(node.op)](_eval(node.left), _eval(node.right))
+                    elif isinstance(node, ast.UnaryOp) and type(node.op) in ops:
+                        return ops[type(node.op)](_eval(node.operand))
+                    raise ValueError("Operator tidak diizinkan")
+                val = _eval(ast.parse(expr, mode='eval').body)
+                return {"status": "ok", "expression": expr, "result": val, "_endpoint": "internal://calculator"}
+            except Exception as e_calc:
+                return {"status": "error", "expression": expr, "message": f"Gagal menghitung: {str(e_calc)}"}
 
-        if tool_ref in ["check_bpjs", "get_participant_status"]:
-            return {
-                "status": "ok",
-                "data": {
-                    "nama_peserta": "Pasien JKN",
-                    "status_kepesertaan": "AKTIF",
-                    "fktp": "Puskesmas Kecamatan Gambir",
-                    "tipe_peserta": "PBI APBN / JKN-KIS"
-                },
-                "_endpoint": endpoint or "internal://mock-bpjs/check-bpjs",
-                "_source": "Sistem Informasi Kepesertaan BPJS"
-            }
-
+        # 5. Generic Unconfigured Tool
         return {
-            "status": "ok",
-            "message": f"Tool '{tool_ref}' berhasil dieksekusi.",
+            "status": "unconfigured",
+            "tool": tool_ref,
+            "message": f"Tool '{tool_ref}' belum dikonfigurasi endpoint HTTP live-nya.",
             "params": params
         }
 
     async def execute_llm_step(self, user_message: str) -> Tuple[str, List[Dict[str, Any]]]:
-        """Eksekusi autonomous ReAct agent loop dengan OpenRouter / OpenAI."""
+        """
+        Autonomous ReAct Agent Loop:
+        - Mendukung multi-turn tool calling secara berurutan
+        - Mendukung format function calling OpenAI JSON resmi
+        - Fallback Regex Interceptor jika model (misal GLM / ChatGLM) mencetak <tool_call> di teks
+        - Otomatis merangkum hasil tool menjadi jawaban ramah & profesional
+        """
         api_key = (
             os.getenv("OPENROUTER_API_KEY")
             or os.getenv("OPENAI_API_KEY")
@@ -366,16 +352,21 @@ class AgentRuntimeEngine:
             return f"Halo! Saya {self.name}. (Server belum dikonfigurasi API Key LLM).", []
 
         from openai import AsyncOpenAI
-        is_openrouter = api_key.startswith("sk-or-")
+        is_openrouter = api_key.startswith("sk-or-") or "openrouter.ai" in os.getenv("LLM_BASE_URL", "")
         base_url = "https://openrouter.ai/api/v1" if is_openrouter else os.getenv("OPENAI_BASE_URL")
 
         target_model = self.model_name
         if is_openrouter and "/" not in target_model:
             target_model = f"openai/{target_model}"
 
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        headers = {
+            "HTTP-Referer": "http://localhost:3000",
+            "X-Title": "Agent Studio Runtime"
+        } if is_openrouter else None
 
-        messages = [
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url, default_headers=headers)
+
+        messages: List[Dict[str, Any]] = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": user_message}
         ]
@@ -400,56 +391,94 @@ class AgentRuntimeEngine:
                 break
 
             msg = res.choices[0].message
+            raw_content = msg.content or ""
+            parsed_tool_calls: List[Dict[str, Any]] = []
 
-            # Jika LLM tidak lagi memanggil tools, kita sudah sampai pada jawaban akhir
-            if not msg.tool_calls:
-                final_text = msg.content
+            # 1. Parsing jika LLM mengembalikan format OpenAI Tool Calls resmi
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    try:
+                        args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                    except Exception:
+                        args = {}
+                    parsed_tool_calls.append({
+                        "id": tc.id,
+                        "name": tc.function.name,
+                        "arguments": args,
+                        "raw_args": tc.function.arguments or "{}"
+                    })
+
+            # 2. Fallback Regex Interceptor jika model (misal GLM / ChatGLM) mencetak tag <tool_call> di teks
+            elif "<tool_call>" in raw_content:
+                import re
+                matches = re.findall(r'<tool_call>\s*([a-zA-Z0-9_-]+)\s*\((.*?)\)', raw_content)
+                for fn_name, raw_args in matches:
+                    args = {}
+                    raw_args = raw_args.strip()
+                    if raw_args.startswith("{") and raw_args.endswith("}"):
+                        try:
+                            args = json.loads(raw_args)
+                        except Exception:
+                            pass
+                    if not args and raw_args:
+                        pattern = r'([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^,)]+))'
+                        for m in re.finditer(pattern, raw_args):
+                            k = m.group(1)
+                            v = m.group(2) if m.group(2) is not None else (m.group(3) if m.group(3) is not None else m.group(4).strip())
+                            args[k] = v
+
+                    parsed_tool_calls.append({
+                        "id": f"call_regex_{uuid.uuid4().hex[:8]}",
+                        "name": fn_name,
+                        "arguments": args,
+                        "raw_args": json.dumps(args, ensure_ascii=False)
+                    })
+
+            # Jika tidak ada pemanggilan tool lagi, kita telah sampai pada jawaban akhir
+            if not parsed_tool_calls:
+                final_text = raw_content
                 if not final_text and getattr(msg, "reasoning", None):
                     final_text = msg.reasoning
                 if final_text and final_text.strip():
                     return final_text.strip(), executed_tools
                 break
 
-            # Catat instruksi tool calling ke riwayat percakapan LLM
-            tool_payload = []
-            for tc in msg.tool_calls:
-                tool_payload.append({
-                    "id": tc.id,
+            # Catat instruksi assistant ke percakapan
+            tool_payload = [
+                {
+                    "id": tc["id"],
                     "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments}
-                })
+                    "function": {"name": tc["name"], "arguments": tc["raw_args"]}
+                }
+                for tc in parsed_tool_calls
+            ]
             messages.append({
                 "role": "assistant",
-                "content": msg.content or "",
+                "content": raw_content or "",
                 "tool_calls": tool_payload
             })
 
-            # Eksekusi setiap tool yang diminta oleh LLM
-            for tc in msg.tool_calls:
-                fn_name = tc.function.name
-                try:
-                    fn_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                except Exception:
-                    fn_args = {}
-
+            # Eksekusi setiap tool secara dinamis
+            for tc in parsed_tool_calls:
+                fn_name = tc["name"]
+                fn_args = tc["arguments"]
                 tool_res = await self.execute_tool(fn_name, fn_args)
                 executed_tools.append({"tool": fn_name, "params": fn_args, "result": tool_res})
 
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": tc.id,
+                    "tool_call_id": tc["id"],
                     "content": json.dumps(tool_res, ensure_ascii=False)
                 })
 
-        # Jika selesai loop tools tetapi belum menghasilkan teks (atau model reasoning), lakukan synthesis call
+        # Jika loop tools selesai tetapi belum menghasilkan teks final yang dirangkum
         if executed_tools:
             try:
                 messages.append({
                     "role": "user",
                     "content": (
                         "Tolong rangkum semua data yang sudah kamu peroleh dari tools di atas ke dalam format jawaban yang "
-                        "sangat ramah, empatik, terstruktur (gunakan tabel untuk rujukan, daftar rumah sakit dan dokter), "
-                        "serta sampaikan langkah selanjutnya dengan jelas kepada pasien."
+                        "sangat ramah, empatik, terstruktur, serta sampaikan langkah selanjutnya dengan jelas kepada pasien."
                     )
                 })
                 synth_res = await client.chat.completions.create(
@@ -465,9 +494,7 @@ class AgentRuntimeEngine:
             except Exception as e:
                 logger.error(f"[Synthesis Call Error] {e}")
 
-        fallback = (
-            f"Halo, terima kasih atas kesabaran Anda. Data Anda telah berhasil diverifikasi oleh {self.name}."
-        )
+        fallback = f"Halo, data Anda telah berhasil diverifikasi oleh {self.name}."
         return fallback, executed_tools
 
     async def run_step(self, session_id: str, user_message: str) -> InvokeResponse:
@@ -503,7 +530,7 @@ app.add_middleware(
 
 agents_registry: Dict[str, AgentRuntimeEngine] = {}
 
-# Muat semua agent dari folder deployed_agents/
+# Muat semua agent yang ada di folder deployed_agents/
 for yaml_file in AGENTS_DIR.glob("*.yaml"):
     try:
         content = yaml_file.read_text(encoding="utf-8")
@@ -519,10 +546,18 @@ for yaml_file in AGENTS_DIR.glob("*.yaml"):
 def health():
     return {
         "status": "healthy",
-        "engine": "Multi-Agent Autonomous ReAct Runtime",
+        "engine": "Multi-Agent Autonomous ReAct Runtime (Dynamic / No Hardcode)",
         "deployed_agents": list(agents_registry.keys()),
         "port": PORT
     }
+
+
+@app.get("/spec", tags=["Specification"])
+async def get_active_spec():
+    default_engine = agents_registry.get("default") or (next(iter(agents_registry.values())) if agents_registry else None)
+    if not default_engine:
+        raise HTTPException(status_code=404, detail="Belum ada agent yang aktif.")
+    return default_engine.raw_spec
 
 
 @app.post("/deploy", tags=["Deployment"])

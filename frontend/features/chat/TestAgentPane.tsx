@@ -169,6 +169,16 @@ export function TestAgentPane({
   const [deployedInfo, setDeployedInfo] = useState<any>(null);
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedEndpoint, setCopiedEndpoint] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+
+  const handleCopyMessage = (msgId: string, text: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedMessageId(msgId);
+    setTimeout(() => {
+      setCopiedMessageId((prev) => (prev === msgId ? null : prev));
+    }, 2000);
+  };
 
   // Deployment Progress & Logs states (matching publishing monitor)
   const [deployStep, setDeployStep] = useState<DeployStep>("idle");
@@ -1559,7 +1569,7 @@ guardrails:
                     )}
 
                     <div
-                      className={`max-w-[85%] rounded-xl p-2.5 text-xs shadow-2xs leading-relaxed ${
+                      className={`max-w-[85%] rounded-xl p-2.5 text-xs shadow-2xs leading-relaxed relative ${
                         msg.sender === "user"
                           ? "bg-blue-600 text-white rounded-br-xs"
                           : msg.status === "error"
@@ -1568,6 +1578,31 @@ guardrails:
                       }`}
                     >
                       <p className="whitespace-pre-line">{msg.text}</p>
+
+                      {/* Footer & Copy Button untuk jawaban Mini Agent */}
+                      {msg.sender === "agent" && (
+                        <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400 select-none">
+                          <span className="font-mono text-[9.5px]">{msg.time || "Mini Agent"}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyMessage(msg.id, msg.text)}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors cursor-pointer text-[10px] font-medium"
+                            title="Salin jawaban agent"
+                          >
+                            {copiedMessageId === msg.id ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-600" />
+                                <span className="text-emerald-600 font-semibold text-[9.5px]">Tersalin!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3 text-slate-400 hover:text-slate-600" />
+                                <span className="text-[9.5px]">Salin</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {msg.sender === "user" && (

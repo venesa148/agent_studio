@@ -530,14 +530,47 @@ class AgentService:
             choice = completion.choices[0]
             msg = choice.message
 
+            # Cek apakah LLM meminta tool calls (baik via struktur tool_calls resmi maupun tag <tool_call> GLM)
+            active_tool_calls = list(msg.tool_calls or [])
+            if not active_tool_calls and "<tool_call>" in (msg.content or ""):
+                import re
+                raw_c = msg.content or ""
+                t_matches = re.findall(r'<tool_call>\s*([a-zA-Z0-9_-]+)\s*\((.*?)\)', raw_c)
+                for fn_n, raw_a in t_matches:
+                    p_args = {}
+                    raw_a = raw_a.strip()
+                    if raw_a.startswith("{") and raw_a.endswith("}"):
+                        try:
+                            p_args = json.loads(raw_a)
+                        except Exception:
+                            pass
+                    if not p_args and raw_a:
+                        pat = r'([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^,)]+))'
+                        for m in re.finditer(pat, raw_a):
+                            k = m.group(1)
+                            v = m.group(2) if m.group(2) is not None else (m.group(3) if m.group(3) is not None else m.group(4).strip())
+                            p_args[k] = v
+
+                    class MockFunction:
+                        def __init__(self, name, args):
+                            self.name = name
+                            self.arguments = json.dumps(args, ensure_ascii=False)
+
+                    class MockToolCall:
+                        def __init__(self, name, args):
+                            self.id = f"call_regex_{uuid.uuid4().hex[:8]}"
+                            self.function = MockFunction(name, args)
+
+                    active_tool_calls.append(MockToolCall(fn_n, p_args))
+
             # Jika LLM tidak meminta pemanggilan tool, kita sudah mendapatkan jawaban akhir!
-            if not msg.tool_calls:
+            if not active_tool_calls:
                 raw_response = msg.content or ""
                 break
 
             # Jika LLM meminta pemanggilan tool (Function Calling)
             tool_calls_payload = []
-            for tc in msg.tool_calls:
+            for tc in active_tool_calls:
                 tool_calls_payload.append({
                     "id": tc.id,
                     "type": "function",
@@ -554,7 +587,7 @@ class AgentService:
             })
 
             # Eksekusi setiap tool yang diminta oleh LLM secara dinamis
-            for tc in msg.tool_calls:
+            for tc in active_tool_calls:
                 fn_name = tc.function.name
                 try:
                     fn_args = json.loads(tc.function.arguments) if tc.function.arguments else {}

@@ -302,7 +302,12 @@ class BuilderService:
                 harness=harness,
                 status=status
             )
-            return BuilderChatResponse(id=current_spec.id, message=f"Draf instruksi diperbarui: {prompt_trimmed}", spec=draft_spec, is_draft=True)
+            return BuilderChatResponse(
+                id=current_spec.id, 
+                message=f"Rancangan spesifikasi dan alur kerja untuk **{name}** telah diperbarui sesuai instruksi Anda.", 
+                spec=draft_spec, 
+                is_draft=True
+            )
         else:
             name = BuilderService._agent_name(prompt_trimmed)
             description = f"Agent untuk: {prompt_trimmed}"
@@ -329,7 +334,7 @@ class BuilderService:
                 status="draft"
             )
             return BuilderChatResponse(
-                message=f"Draf awal untuk '{name}' telah disiapkan. Apakah ada yang ingin ditambahkan?",
+                message=f"Draf arsitektur awal untuk **{name}** telah disiapkan dengan kapabilitas yang sesuai.",
                 spec=draft_spec,
                 is_draft=True
             )
