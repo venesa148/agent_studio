@@ -15,10 +15,13 @@ engine_kwargs = {
     "pool_recycle": 300,
 }
 
-if db_url.startswith("postgresql://"):
-    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-elif db_url.startswith("mysql://"):
-    db_url = db_url.replace("mysql://", "mysql+aiomysql://", 1)
+if db_url.startswith("postgresql"):
+    if db_url.startswith("postgresql://"):
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    engine_kwargs["connect_args"] = {"prepared_statement_cache_size": 0}
+elif db_url.startswith("mysql"):
+    if db_url.startswith("mysql://"):
+        db_url = db_url.replace("mysql://", "mysql+aiomysql://", 1)
 
 import ssl
 
@@ -26,7 +29,7 @@ if "tidbcloud.com" in db_url:
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
-    engine_kwargs["connect_args"] = {"ssl": ssl_context}
+    engine_kwargs.setdefault("connect_args", {})["ssl"] = ssl_context
 
 engine = create_async_engine(
     db_url,
@@ -61,7 +64,7 @@ async def init_db():
             if "input_schema" not in cols:
                 await conn.execute(text("ALTER TABLE tools ADD COLUMN input_schema JSON NULL"))
             if "is_active" not in cols:
-                await conn.execute(text("ALTER TABLE tools ADD COLUMN is_active BOOLEAN DEFAULT 1"))
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN is_active BOOLEAN DEFAULT TRUE"))
             if "auth_custody" not in cols:
                 await conn.execute(text("ALTER TABLE tools ADD COLUMN auth_custody VARCHAR(100) DEFAULT 'none'"))
             if "health_status" not in cols:
@@ -82,7 +85,7 @@ async def init_db():
                     await conn.execute(
                         text("INSERT INTO mcp_servers (id, name, url, status, created_at, updated_at) "
                              "VALUES (:id, :name, :url, 'connected', :created_at, :updated_at)"),
-                        {"id": local_mcp_id, "name": "JKN Care Services MCP", "url": "http://localhost:8000/api/v1/mcp/local-server", "created_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}
+                        {"id": local_mcp_id, "name": "JKN Care Services MCP", "url": "http://localhost:8000/api/v1/mcp/local-server", "created_at": datetime.utcnow(), "updated_at": datetime.utcnow()}
                     )
 
             default_builtin_tools = [
@@ -108,8 +111,8 @@ async def init_db():
                     mcp_srv_val = local_mcp_id if t_source == "mcp" else None
                     await conn.execute(
                         text("INSERT INTO tools (id, name, description, source_type, mcp_server_id, is_active, auth_custody, health_status, used_by, created_at) "
-                             "VALUES (:id, :name, :description, :source_type, :mcp_server_id, 1, 'none', 'healthy', 'All agents', :created_at)"),
-                        {"id": t_id, "name": t_name, "description": t_desc, "source_type": t_source, "mcp_server_id": mcp_srv_val, "created_at": datetime.now(timezone.utc)}
+                             "VALUES (:id, :name, :description, :source_type, :mcp_server_id, TRUE, 'none', 'healthy', 'All agents', :created_at)"),
+                        {"id": t_id, "name": t_name, "description": t_desc, "source_type": t_source, "mcp_server_id": mcp_srv_val, "created_at": datetime.utcnow()}
                     )
 
 

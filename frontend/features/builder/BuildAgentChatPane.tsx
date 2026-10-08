@@ -53,6 +53,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
   };
 
   const getStorageKey = (agentId?: string) => `builder_chat_history_${agentId || "global"}`;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
   useEffect(() => {
     scrollToBottom();
@@ -93,52 +94,76 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
 
     if (currentAgentIdRef.current !== activeAgent.id) {
       if (!skipClearRef.current) {
-        // Pulihkan riwayat percakapan sebelumnya dari localStorage untuk agen ini
-        const saved = typeof window !== "undefined" ? localStorage.getItem(getStorageKey(activeAgent.id)) : null;
-        let loadedMessages: Message[] = [];
-        if (saved) {
+        const loadHistory = async () => {
           try {
-            loadedMessages = JSON.parse(saved);
+            const res = await fetch(`${apiUrl}/api/v1/builder/history/${activeAgent.id}`);
+            if (res.ok) {
+              const apiMessages = await res.json();
+              if (apiMessages && apiMessages.length > 0) {
+                const updated = apiMessages.map((m: any, idx: number) => {
+                  if (idx === apiMessages.length - 1 && m.spec) {
+                    return { ...m, spec: { ...m.spec, ...activeAgent } };
+                  }
+                  return m;
+                });
+                setMessages(updated);
+                setInput("");
+                setErrorMessage(null);
+                setSaveSuccessMsg(null);
+                return;
+              }
+            }
           } catch (e) {
-            console.warn("Gagal mem-parsing cached messages:", e);
+            console.warn("Gagal memuat history builder dari backend:", e);
           }
-        }
 
-        if (loadedMessages.length > 0) {
-          // Sinkronkan spec pesan terakhir dengan data activeAgent terbaru dari DB
-          const updated = loadedMessages.map((m, idx) => {
-            if (idx === loadedMessages.length - 1 && m.spec) {
-              return { ...m, spec: { ...m.spec, ...activeAgent } };
-            }
-            return m;
-          });
-          setMessages(updated);
-        } else {
-          // Jika belum ada riwayat chat, mulai dengan konfigurasi aktif
-          const initialMsgs: Message[] = [
-            {
-              id: `system-spec-${activeAgent.id}`,
-              sender: "builder",
-              text: `Berikut adalah konfigurasi aktif untuk Agent '${activeAgent.name}'. Anda dapat langsung mengubahnya melalui form di bawah ini, atau memberi instruksi perubahan melalui chat.`,
-              spec: activeAgent,
-              is_draft: false,
-              time: "Sistem",
-            }
-          ];
-          setMessages(initialMsgs);
-          if (typeof window !== "undefined") {
+          // Fallback to localStorage
+          const saved = typeof window !== "undefined" ? localStorage.getItem(getStorageKey(activeAgent.id)) : null;
+          let loadedMessages: Message[] = [];
+          if (saved) {
             try {
-              localStorage.setItem(getStorageKey(activeAgent.id), JSON.stringify(initialMsgs));
-            } catch { }
+              loadedMessages = JSON.parse(saved);
+            } catch (e) {
+              console.warn("Gagal mem-parsing cached messages:", e);
+            }
           }
-        }
-        setInput("");
-        setErrorMessage(null);
-        setSaveSuccessMsg(null);
+
+          if (loadedMessages.length > 0) {
+            const updated = loadedMessages.map((m, idx) => {
+              if (idx === loadedMessages.length - 1 && m.spec) {
+                return { ...m, spec: { ...m.spec, ...activeAgent } };
+              }
+              return m;
+            });
+            setMessages(updated);
+          } else {
+            const initialMsgs: Message[] = [
+              {
+                id: `system-spec-${activeAgent.id}`,
+                sender: "builder",
+                text: `Berikut adalah konfigurasi aktif untuk Agent '${activeAgent.name}'. Anda dapat langsung mengubahnya melalui form di bawah ini, atau memberi instruksi perubahan melalui chat.`,
+                spec: activeAgent,
+                is_draft: false,
+                time: "Sistem",
+              }
+            ];
+            setMessages(initialMsgs);
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.setItem(getStorageKey(activeAgent.id), JSON.stringify(initialMsgs));
+              } catch { }
+            }
+          }
+          setInput("");
+          setErrorMessage(null);
+          setSaveSuccessMsg(null);
+        };
+        
+        loadHistory();
       }
       currentAgentIdRef.current = activeAgent.id;
     }
-  }, [activeAgent]);
+  }, [activeAgent, apiUrl]);
 
   useEffect(() => {
     fetch("/api/v1/tools")
@@ -163,7 +188,6 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
     );
   };
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
   const handleSend = async (customPrompt?: string, e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -298,6 +322,17 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
         try {
           localStorage.setItem(getStorageKey(savedSpec.id), JSON.stringify(updatedMessages));
         } catch { }
+      }
+
+      // Save history to backend
+      try {
+        await fetch(`${apiUrl}/api/v1/builder/history/${savedSpec.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: updatedMessages }),
+        });
+      } catch (err) {
+        console.warn("Gagal menyimpan history builder ke backend:", err);
       }
 
       skipClearRef.current = true;
