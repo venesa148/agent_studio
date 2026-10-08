@@ -36,11 +36,15 @@ class ToolRegistryService:
             if not mcp_server:
                 raise ValueError(f"MCP server untuk tool '{tool_name}' tidak ditemukan.")
             server_url = mcp_server.url
-            output = await MCPClientService.call_tool(server_url, tool_name, params)
+            try:
+                output = await MCPClientService.call_tool(server_url, tool_name, params)
+            except Exception:
+                # Jika server remote merupakan REST API (bukan native JSON-RPC) atau gagal via SSE, fallback ke executor internal/REST
+                output = await ToolRegistryService._execute_builtin_tool(tool_name, params, db=db, tool_entry=tool_entry)
         elif tool_entry and tool_entry.source_type == "openapi":
             output = await ToolRegistryService._execute_openapi_tool(tool_entry, params)
         elif tool_entry and tool_entry.source_type == "builtin":
-            output = await ToolRegistryService._execute_builtin_tool(tool_name, params)
+            output = await ToolRegistryService._execute_builtin_tool(tool_name, params, db=db, tool_entry=tool_entry)
         else:
             raise ValueError(f"Tool '{tool_name}' tidak memiliki executor yang didukung.")
 
@@ -54,12 +58,59 @@ class ToolRegistryService:
         }
 
     @staticmethod
-    async def _execute_builtin_tool(tool_name: str, params: Dict[str, Any]) -> Any:
+    async def _execute_builtin_tool(
+        tool_name: str, params: Dict[str, Any], db: Optional[AsyncSession] = None, tool_entry: Optional[ToolModel] = None
+    ) -> Any:
         import os
         from app.core.config import settings
 
-        api_base = getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "https://sisters-given-cloud-nerve.trycloudflare.com")
-        api_base = api_base.rstrip("/")
+        # Resolusi dinamis api_base dari database (input_schema tool / mcp_server) sebelum fallback ke .env
+        api_base = None
+        if tool_entry and tool_entry.input_schema:
+            api_base = (
+                tool_entry.input_schema.get("x-api-config", {}).get("base_url")
+                or tool_entry.input_schema.get("x-openapi", {}).get("server_url")
+                or tool_entry.input_schema.get("base_url")
+            )
+
+        if not api_base and db:
+            if tool_entry and tool_entry.mcp_server_id:
+                mcp_res = await db.execute(select(MCPServerModel).where(MCPServerModel.id == tool_entry.mcp_server_id))
+                mcp_srv = mcp_res.scalar_one_or_none()
+                if mcp_srv and mcp_srv.url and not mcp_srv.url.endswith("/local-server"):
+                    api_base = mcp_srv.url
+
+            if not api_base:
+                t_res = await db.execute(select(ToolModel).where(ToolModel.name == tool_name))
+                t_obj = t_res.scalar_one_or_none()
+                if t_obj:
+                    if t_obj.input_schema:
+                        api_base = (
+                            t_obj.input_schema.get("x-api-config", {}).get("base_url")
+                            or t_obj.input_schema.get("x-openapi", {}).get("server_url")
+                            or t_obj.input_schema.get("base_url")
+                        )
+                    if not api_base and t_obj.mcp_server_id:
+                        mcp_res = await db.execute(select(MCPServerModel).where(MCPServerModel.id == t_obj.mcp_server_id))
+                        mcp_srv = mcp_res.scalar_one_or_none()
+                        if mcp_srv and mcp_srv.url and not mcp_srv.url.endswith("/local-server"):
+                            api_base = mcp_srv.url
+
+            if not api_base:
+                ext_mcp_res = await db.execute(
+                    select(MCPServerModel).where(
+                        MCPServerModel.url.notlike("%/local-server%"),
+                        MCPServerModel.status == "connected"
+                    )
+                )
+                ext_srv = ext_mcp_res.scalars().first()
+                if ext_srv and ext_srv.url:
+                    api_base = ext_srv.url
+
+        if not api_base:
+            api_base = getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "https://sisters-given-cloud-nerve.trycloudflare.com")
+
+        api_base = str(api_base).rstrip("/")
 
         # 1. get_referral_status
         if tool_name == "get_referral_status":
@@ -103,8 +154,8 @@ class ToolRegistryService:
                     "message": f"Server database faskes sedang tidak dapat dijangkau / offline ({type(e).__name__}). Data status rujukan {ref_id} tidak dapat diverifikasi saat ini."
                 }
 
-        # 2. search_hospital / hospital_finder
-        elif tool_name in ["search_hospital", "hospital_finder"]:
+        # 2. search_hospital / hospital_finder / search_hospitals
+        elif tool_name in ["search_hospital", "hospital_finder", "search_hospitals"]:
             city_raw = str(params.get("city") or params.get("location") or "Jakarta").strip()
             target_url = f"{api_base}/api/v1/mock-bpjs/hospitals"
             
@@ -140,10 +191,10 @@ class ToolRegistryService:
                     "message": f"Server direktori rumah sakit sedang tidak dapat dijangkau / offline ({type(e).__name__}). Daftar faskes di wilayah '{city_raw}' belum dapat dimuat."
                 }
 
-        # 3. find_specialist
-        elif tool_name == "find_specialist":
+        # 3. find_specialist / search_doctors
+        elif tool_name in ["find_specialist", "search_doctors"]:
             specialty = str(params.get("specialty") or "Jantung").strip()
-            city = str(params.get("city") or params.get("location") or "Jakarta").strip()
+            city = str(params.get("city") or params.get("location") or params.get("hospital_name") or "Jakarta").strip()
             target_url = f"{api_base}/api/v1/mock-bpjs/specialists"
             
             try:
@@ -179,9 +230,9 @@ class ToolRegistryService:
                     "message": f"Server direktori dokter spesialis sedang tidak dapat dijangkau / offline ({type(e).__name__})."
                 }
 
-        # 4. check_bpjs
-        elif tool_name == "check_bpjs":
-            bpjs_id = str(params.get("bpjs_id") or params.get("number") or params.get("hospital_id") or "").strip()
+        # 4. check_bpjs / get_participant_status
+        elif tool_name in ["check_bpjs", "get_participant_status"]:
+            bpjs_id = str(params.get("participant_id") or params.get("bpjs_id") or params.get("number") or params.get("hospital_id") or "").strip()
             target_url = f"{api_base}/api/v1/mock-bpjs/check-bpjs"
             
             try:
@@ -333,6 +384,175 @@ class ToolRegistryService:
                     "_endpoint": target_url,
                     "_source": "REST API Runner",
                     "message": f"Gagal memanggil endpoint '{target_url}': {str(e_http)}"
+                }
+
+        # 8. classify_complaint (Clinical Triage Protocol)
+        elif tool_name == "classify_complaint":
+            complaint = str(params.get("complaint") or params.get("keluhan") or "").strip()
+            if not complaint:
+                return {"status": "error", "message": "Parameter 'complaint' tidak boleh kosong."}
+
+            complaint_lower = complaint.lower()
+            red_flags = ["pingsan", "sesak nafas", "nyeri dada hebat", "darurat", "kejang", "tidak sadar", "pendarahan hebat", "stroke", "lumpuh", "koma"]
+            matched_red_flags = [rf for rf in red_flags if rf in complaint_lower]
+            if matched_red_flags:
+                return {
+                    "status": "ok",
+                    "triage_class": "EMERGENCY",
+                    "red_flag": True,
+                    "matched_red_flags": matched_red_flags,
+                    "candidate_service": ["IGD / Instalasi Gawat Darurat"],
+                    "action": "ESCALATE_TO_EMERGENCY",
+                    "_source": "Clinical Triage Protocol",
+                    "message": "Terdeteksi indikasi gawat darurat (Red Flag). Alur booking dokter reguler dihentikan. Segera arahkan pasien ke IGD rumah sakit terdekat atau hubungi 119."
+                }
+
+            ortho_kw = ["lutut", "sendi", "tulang", "patah", "keseleo", "otot", "kaki", "pinggang", "punggung", "tangan", "bahu", "engsel", "retak"]
+            if any(k in complaint_lower for k in ortho_kw):
+                return {
+                    "status": "ok",
+                    "triage_class": "NEED_FURTHER_CARE",
+                    "red_flag": False,
+                    "complaint_summary": complaint,
+                    "candidate_service": ["Orthopaedi", "Rehabilitasi Medik"],
+                    "requires_eligibility_check": True,
+                    "clarifying_questions": [
+                        "Apakah ada pembengkakan atau kemerahan pada area lutut/sendi?",
+                        "Apakah ada riwayat cedera fisik atau jatuh?",
+                        "Apakah pasien masih dapat berjalan atau menopang berat badan?"
+                    ],
+                    "_source": "Clinical Triage Protocol",
+                    "message": "Keluhan mengarah ke sistem muskuloskeletal. Disarankan pemeriksaan lanjutan ke poli Orthopaedi atau Rehabilitasi Medik."
+                }
+
+            if any(k in complaint_lower for k in ["mata", "rabun", "katarak", "silau", "penglihatan"]):
+                return {
+                    "status": "ok",
+                    "triage_class": "NEED_FURTHER_CARE",
+                    "red_flag": False,
+                    "complaint_summary": complaint,
+                    "candidate_service": ["Poli Spesialis Mata"],
+                    "requires_eligibility_check": True,
+                    "_source": "Clinical Triage Protocol",
+                    "message": "Disarankan konsultasi ke poli Spesialis Mata."
+                }
+
+            if any(k in complaint_lower for k in ["gigi", "gusi", "geraham", "tambal", "cabut gigi"]):
+                return {
+                    "status": "ok",
+                    "triage_class": "NEED_FURTHER_CARE",
+                    "red_flag": False,
+                    "candidate_service": ["Poli Gigi & Mulut"],
+                    "requires_eligibility_check": True,
+                    "_source": "Clinical Triage Protocol",
+                    "message": "Disarankan konsultasi ke Poli Gigi & Mulut."
+                }
+
+            if any(k in complaint_lower for k in ["anak", "bayi", "balita"]):
+                return {
+                    "status": "ok",
+                    "triage_class": "NEED_FURTHER_CARE",
+                    "red_flag": False,
+                    "candidate_service": ["Poli Spesialis Anak"],
+                    "requires_eligibility_check": True,
+                    "_source": "Clinical Triage Protocol",
+                    "message": "Disarankan konsultasi ke Poli Spesialis Anak."
+                }
+
+            if any(k in complaint_lower for k in ["sakit", "nyeri", "demam", "batuk", "flu", "pusing", "mual", "perut", "diare", "gatal"]):
+                return {
+                    "status": "ok",
+                    "triage_class": "NEED_FURTHER_CARE",
+                    "red_flag": False,
+                    "candidate_service": ["Poli Umum FKTP", "Poli Penyakit Dalam"],
+                    "requires_eligibility_check": True,
+                    "_source": "Clinical Triage Protocol",
+                    "message": "Disarankan pemeriksaan awal di FKTP terdaftar (Puskesmas/Klinik)."
+                }
+
+            return {
+                "status": "ok",
+                "triage_class": "INFORMATION_ONLY",
+                "red_flag": False,
+                "candidate_service": [],
+                "requires_eligibility_check": False,
+                "_source": "Clinical Triage Protocol",
+                "message": "Pertanyaan administratif atau informasi umum, tidak memerlukan rujukan dokter spesialis."
+            }
+
+        # 9. create_appointment
+        elif tool_name == "create_appointment":
+            patient_name = str(params.get("patient_name") or params.get("name") or "Pasien").strip()
+            hospital_name = str(params.get("hospital_name") or params.get("hospital") or "RS Mitra").strip()
+            doctor_name = str(params.get("doctor_name") or params.get("doctor") or "dr. Spesialis").strip()
+            appt_date = str(params.get("date") or "2026-10-15").strip()
+            time_slot = str(params.get("time_slot") or "09:00 - 10:00 WIB").strip()
+
+            target_url = f"{api_base}/api/v1/mock-bpjs/appointments"
+            booking_payload = {
+                "patient_name": patient_name,
+                "hospital_name": hospital_name,
+                "doctor_name": doctor_name,
+                "date": appt_date,
+                "time_slot": time_slot
+            }
+
+            try:
+                async with httpx.AsyncClient(timeout=6.0) as client:
+                    resp = await client.post(target_url, json=booking_payload)
+                    if resp.status_code in [200, 201]:
+                        data = resp.json()
+                        res_data = data.get("data", data)
+                        if isinstance(res_data, dict):
+                            res_data["_endpoint"] = target_url
+                            res_data["_source"] = "Live Web API Appointment"
+                        return res_data
+                    return {
+                        "status": "error",
+                        "error_type": "REMOTE_API_ERROR",
+                        "_endpoint": target_url,
+                        "_source": "Live Web API Appointment",
+                        "message": f"Server Web API booking mengembalikan kode status HTTP {resp.status_code}."
+                    }
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "error_type": "SERVICE_UNAVAILABLE",
+                    "_endpoint": target_url,
+                    "_source": "Live Web API Appointment (Offline)",
+                    "booking_draft": booking_payload,
+                    "message": f"Server Web API booking appointment sedang offline atau tidak dapat dijangkau ({type(e).__name__}). Janji temu belum dapat dikonfirmasi ke rumah sakit."
+                }
+
+        # 10. get_appointment
+        elif tool_name == "get_appointment":
+            booking_id = str(params.get("booking_id") or params.get("id") or "").strip()
+            target_url = f"{api_base}/api/v1/mock-bpjs/appointments/{booking_id}"
+            try:
+                async with httpx.AsyncClient(timeout=6.0) as client:
+                    resp = await client.get(target_url)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        res_data = data.get("data", data)
+                        if isinstance(res_data, dict):
+                            res_data["_endpoint"] = target_url
+                            res_data["_source"] = "Live Web API Appointment"
+                        return res_data
+                    return {
+                        "status": "error",
+                        "error_type": "REMOTE_API_ERROR",
+                        "_endpoint": target_url,
+                        "_source": "Live Web API Appointment",
+                        "message": f"Server Web API mengembalikan status {resp.status_code} saat mencari booking {booking_id}."
+                    }
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "error_type": "SERVICE_UNAVAILABLE",
+                    "_endpoint": target_url,
+                    "_source": "Live Web API Appointment (Offline)",
+                    "booking_id": booking_id,
+                    "message": f"Server Web API appointment sedang offline ({type(e).__name__}). Data tiket booking {booking_id} tidak dapat dimuat."
                 }
 
         return {"status": "ok", "tool": tool_name, "params": params}

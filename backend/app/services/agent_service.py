@@ -115,6 +115,90 @@ DEFAULT_BUILTIN_SCHEMAS: Dict[str, Dict[str, Any]] = {
             }
         },
         "required": ["url"]
+    },
+    "classify_complaint": {
+        "type": "object",
+        "properties": {
+            "complaint": {
+                "type": "string",
+                "description": "Keluhan, gejala kesehatan, atau pertanyaan yang disampaikan pengguna"
+            }
+        },
+        "required": ["complaint"]
+    },
+    "get_participant_status": {
+        "type": "object",
+        "properties": {
+            "participant_id": {
+                "type": "string",
+                "description": "Nomor kartu BPJS/JKN atau NIK peserta (contoh: 000123456789)"
+            }
+        },
+        "required": ["participant_id"]
+    },
+    "search_hospitals": {
+        "type": "object",
+        "properties": {
+            "city": {
+                "type": "string",
+                "description": "Nama kota fasilitas kesehatan (contoh: Jakarta, Bandung, Surabaya)"
+            },
+            "service": {
+                "type": "string",
+                "description": "Poli atau layanan medis yang dicari (contoh: Orthopaedi, Penyakit Dalam)"
+            }
+        },
+        "required": ["city"]
+    },
+    "search_doctors": {
+        "type": "object",
+        "properties": {
+            "hospital_name": {
+                "type": "string",
+                "description": "Nama rumah sakit tujuan"
+            },
+            "specialty": {
+                "type": "string",
+                "description": "Spesialisasi atau poli dokter (contoh: Orthopaedi, Jantung, Anak)"
+            }
+        },
+        "required": ["hospital_name", "specialty"]
+    },
+    "create_appointment": {
+        "type": "object",
+        "properties": {
+            "patient_name": {
+                "type": "string",
+                "description": "Nama lengkap pasien"
+            },
+            "hospital_name": {
+                "type": "string",
+                "description": "Nama rumah sakit tujuan"
+            },
+            "doctor_name": {
+                "type": "string",
+                "description": "Nama dokter yang dipilih"
+            },
+            "date": {
+                "type": "string",
+                "description": "Tanggal appointment (format: YYYY-MM-DD)"
+            },
+            "time_slot": {
+                "type": "string",
+                "description": "Slot jam janji temu (contoh: 09:00 - 10:00 WIB)"
+            }
+        },
+        "required": ["patient_name", "hospital_name", "doctor_name", "date"]
+    },
+    "get_appointment": {
+        "type": "object",
+        "properties": {
+            "booking_id": {
+                "type": "string",
+                "description": "Nomor booking atau kode tiket antrean"
+            }
+        },
+        "required": ["booking_id"]
     }
 }
 

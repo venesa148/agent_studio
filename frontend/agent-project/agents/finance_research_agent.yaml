@@ -1,12 +1,12 @@
 spec_version: v1.0
 metadata:
-  id: e5bbd3fd-ba22-478d-8dad-93f72c0187b4
+  id: b717c87b-31bb-4585-8b76-7d576b00b21b
   name: Finance & Research Agent
   slug: finance_research_agent
   description: Agent riset pasar dan kalkulasi keuangan
   status: active
-  created_at: '2026-10-08T03:41:56.759152'
-  updated_at: '2026-10-08T03:41:56.759152'
+  created_at: '2026-10-08T04:53:10.903492'
+  updated_at: '2026-10-08T04:53:10.903492'
 configuration:
   model: z-ai/glm-5.3
   harness: default-safe-v1

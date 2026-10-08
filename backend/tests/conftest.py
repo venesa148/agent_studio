@@ -40,6 +40,12 @@ async def prepare_database():
             ("hospital_finder", "Cari data rumah sakit terdekat dan status faskes BPJS", "builtin"),
             ("calculator", "Evaluasi ekspresi matematika dan kalkulasi angka secara presisi", "builtin"),
             ("api_fetch", "Panggil REST API publik melalui HTTP GET atau POST", "builtin"),
+            ("classify_complaint", "Triage keluhan klinis (EMERGENCY, NEED_FURTHER_CARE, INFORMATION_ONLY) dan mapping poli kandidat", "mcp"),
+            ("get_participant_status", "Cek status kepesertaan JKN/BPJS dan kelayakan administrasi peserta", "mcp"),
+            ("search_hospitals", "Cari direktori rumah sakit rekanan BPJS berdasarkan kota/layanan via Web API", "mcp"),
+            ("search_doctors", "Cari dokter spesialis dan ketersediaan jadwal praktik di rumah sakit via Web API", "mcp"),
+            ("create_appointment", "Booking janji temu/antrean faskes BPJS setelah konfirmasi eksplisit dari user via Web API", "mcp"),
+            ("get_appointment", "Cek status booking janji temu dan nomor antrean pasien via Web API", "mcp"),
         ]
         from datetime import datetime, timezone
         for t_name, t_desc, t_source in default_builtin_tools:

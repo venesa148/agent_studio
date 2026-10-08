@@ -69,8 +69,22 @@ async def init_db():
             if "used_by" not in cols:
                 await conn.execute(text("ALTER TABLE tools ADD COLUMN used_by VARCHAR(255) DEFAULT 'All agents'"))
 
-            # Pastikan tools built-in standar tersimpan di database
+            # Pastikan MCP server lokal dan tools terdaftar di database
             import uuid
+            from datetime import datetime, timezone
+
+            local_mcp_id = None
+            if "mcp_servers" in tables:
+                mcp_check = await conn.execute(text("SELECT id FROM mcp_servers WHERE url = :url"), {"url": "http://localhost:8000/api/v1/mcp/local-server"})
+                local_mcp_id = mcp_check.scalar()
+                if not local_mcp_id:
+                    local_mcp_id = str(uuid.uuid4())
+                    await conn.execute(
+                        text("INSERT INTO mcp_servers (id, name, url, status, created_at, updated_at) "
+                             "VALUES (:id, :name, :url, 'connected', :created_at, :updated_at)"),
+                        {"id": local_mcp_id, "name": "JKN Care Services MCP", "url": "http://localhost:8000/api/v1/mcp/local-server", "created_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}
+                    )
+
             default_builtin_tools = [
                 ("search_hospital", "Cari data rumah sakit rekanan BPJS dan ketersediaan layanan faskes", "builtin"),
                 ("get_referral_status", "Cek status dan validitas nomor rujukan faskes BPJS", "builtin"),
@@ -80,16 +94,22 @@ async def init_db():
                 ("hospital_finder", "Cari data rumah sakit terdekat dan status faskes BPJS", "builtin"),
                 ("calculator", "Evaluasi ekspresi matematika dan kalkulasi angka secara presisi", "builtin"),
                 ("api_fetch", "Panggil REST API publik melalui HTTP GET atau POST", "builtin"),
+                ("classify_complaint", "Triage keluhan klinis (EMERGENCY, NEED_FURTHER_CARE, INFORMATION_ONLY) dan mapping poli kandidat", "mcp"),
+                ("get_participant_status", "Cek status kepesertaan JKN/BPJS dan kelayakan administrasi peserta", "mcp"),
+                ("search_hospitals", "Cari direktori rumah sakit rekanan BPJS berdasarkan kota/layanan via Web API", "mcp"),
+                ("search_doctors", "Cari dokter spesialis dan ketersediaan jadwal praktik di rumah sakit via Web API", "mcp"),
+                ("create_appointment", "Booking janji temu/antrean faskes BPJS setelah konfirmasi eksplisit dari user via Web API", "mcp"),
+                ("get_appointment", "Cek status booking janji temu dan nomor antrean pasien via Web API", "mcp"),
             ]
-            from datetime import datetime, timezone
             for t_name, t_desc, t_source in default_builtin_tools:
                 check_t = await conn.execute(text("SELECT id FROM tools WHERE name = :name"), {"name": t_name})
                 if not check_t.scalar():
                     t_id = str(uuid.uuid4())
+                    mcp_srv_val = local_mcp_id if t_source == "mcp" else None
                     await conn.execute(
-                        text("INSERT INTO tools (id, name, description, source_type, is_active, auth_custody, health_status, used_by, created_at) "
-                             "VALUES (:id, :name, :description, :source_type, 1, 'none', 'healthy', 'All agents', :created_at)"),
-                        {"id": t_id, "name": t_name, "description": t_desc, "source_type": t_source, "created_at": datetime.now(timezone.utc)}
+                        text("INSERT INTO tools (id, name, description, source_type, mcp_server_id, is_active, auth_custody, health_status, used_by, created_at) "
+                             "VALUES (:id, :name, :description, :source_type, :mcp_server_id, 1, 'none', 'healthy', 'All agents', :created_at)"),
+                        {"id": t_id, "name": t_name, "description": t_desc, "source_type": t_source, "mcp_server_id": mcp_srv_val, "created_at": datetime.now(timezone.utc)}
                     )
 
 
