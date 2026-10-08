@@ -23,8 +23,11 @@ import {
   Terminal,
   Copy,
   Check,
+  Clock,
+  Sparkle,
 } from "lucide-react";
 import { AgentSpecData } from "@/app/page";
+import { AgentDraft, saveDraft, deleteDraft, getDraftById } from "@/lib/draftStore";
 
 interface Message {
   id: string;
@@ -37,11 +40,17 @@ interface Message {
 
 interface BuildAgentChatPaneProps {
   activeAgent?: AgentSpecData | null;
+  activeDraftId?: string | null;
   onAgentCreated?: (agentSpec: AgentSpecData) => void;
   onClearActiveAgent?: () => void;
 }
 
-export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveAgent }: BuildAgentChatPaneProps) {
+export function BuildAgentChatPane({
+  activeAgent,
+  activeDraftId,
+  onAgentCreated,
+  onClearActiveAgent,
+}: BuildAgentChatPaneProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isBuilding, setIsBuilding] = useState(false);
@@ -50,6 +59,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [dbTools, setDbTools] = useState<any[]>([]);
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+  const [activeDraft, setActiveDraft] = useState<AgentDraft | null>(null);
 
   const handleCopyPrompt = (promptText: string, id: string) => {
     if (!navigator?.clipboard) return;
@@ -61,6 +71,7 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const skipClearRef = React.useRef(false);
   const currentAgentIdRef = React.useRef<string | undefined>(undefined);
+  const currentDraftIdRef = React.useRef<string | undefined>(undefined);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -84,7 +95,44 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
     }
   }, [messages]);
 
+  // Handle draft loading via activeDraftId
   useEffect(() => {
+    if (activeDraftId) {
+      const draft = getDraftById(activeDraftId);
+      if (draft) {
+        currentDraftIdRef.current = draft.id;
+        setActiveDraft(draft);
+        currentAgentIdRef.current = undefined;
+        if (draft.messages && draft.messages.length > 0) {
+          setMessages(draft.messages);
+        } else {
+          setMessages([
+            {
+              id: `draft-init-${draft.id}`,
+              sender: "builder",
+              text: `Draf '${draft.name}' berhasil dimuat dari penyimpanan lokal. Anda dapat melanjutkan instruksi ke builder untuk menyempurnakannya atau langsung menekan tombol 'Terapkan ke DB'.`,
+              spec: draft as any,
+              is_draft: true,
+              time: "Draf Lokal",
+            },
+          ]);
+        }
+        setInput("");
+        setErrorMessage(null);
+        setSaveSuccessMsg(null);
+        return;
+      }
+    } else if (!activeAgent) {
+      currentDraftIdRef.current = undefined;
+      setActiveDraft(null);
+    }
+  }, [activeDraftId]);
+
+  useEffect(() => {
+    if (activeDraftId) {
+      return;
+    }
+
     if (!activeAgent) {
       if (currentAgentIdRef.current !== undefined) {
         // Coba pulihkan riwayat chat sesi global/tanpa agen jika ada
@@ -106,7 +154,23 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
       return;
     }
 
+    // Jika activeAgent adalah draft
+    if (activeAgent.id && activeAgent.id.startsWith("draft_")) {
+      const draft = getDraftById(activeAgent.id);
+      if (draft) {
+        currentDraftIdRef.current = draft.id;
+        setActiveDraft(draft);
+        currentAgentIdRef.current = undefined;
+        if (draft.messages && draft.messages.length > 0) {
+          setMessages(draft.messages);
+          return;
+        }
+      }
+    }
+
     if (currentAgentIdRef.current !== activeAgent.id) {
+      currentDraftIdRef.current = undefined;
+      setActiveDraft(null);
       if (!skipClearRef.current) {
         const loadHistory = async () => {
           try {
@@ -255,10 +319,38 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
         time: "Baru saja",
       };
 
-      setMessages((prev) => [...prev, builderResponse]);
+      const newMessages = [...messages, userMsg, builderResponse];
+      setMessages(newMessages);
+
+      // Simpan ke DRAFT STORE jika berstatus draft / belum disimpan di database
+      if (data.is_draft !== false || !data.spec?.id) {
+        if (!currentDraftIdRef.current) {
+          currentDraftIdRef.current = `draft_${Date.now()}`;
+        }
+        const savedDraft = saveDraft({
+          id: currentDraftIdRef.current,
+          name: data.spec?.name || "Draf Agen Baru",
+          description: data.spec?.description || "",
+          instructions: data.spec?.instructions || "",
+          model: data.spec?.model || "z-ai/glm-5.3",
+          tools: data.spec?.tools || [],
+          mcp_servers: data.spec?.mcp_servers || [],
+          harness: data.spec?.harness || "default-safe-v1",
+          messages: newMessages,
+        });
+        setActiveDraft(savedDraft);
+        if (typeof window !== "undefined" && !window.location.search.includes("id=")) {
+          window.history.replaceState({}, '', `/?draft_id=${savedDraft.id}`);
+        }
+      }
 
       // HANYA update activeAgent jika sudah committed / bukan draft
       if (data.spec && data.is_draft === false && data.spec.id) {
+        if (currentDraftIdRef.current) {
+          deleteDraft(currentDraftIdRef.current);
+          currentDraftIdRef.current = undefined;
+          setActiveDraft(null);
+        }
         skipClearRef.current = true;
         currentAgentIdRef.current = data.spec.id;
         onAgentCreated?.(data.spec);
@@ -287,26 +379,53 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
   };
 
   const handleReset = () => {
+    if (currentDraftIdRef.current) {
+      deleteDraft(currentDraftIdRef.current);
+      currentDraftIdRef.current = undefined;
+      setActiveDraft(null);
+    }
     if (typeof window !== "undefined") {
       try {
         localStorage.removeItem(getStorageKey(currentAgentIdRef.current));
       } catch { }
+      window.history.replaceState({}, '', '/?new=true');
     }
     setMessages([]);
     setInput("");
     setErrorMessage(null);
     setSaveSuccessMsg(null);
+    onClearActiveAgent?.();
   };
 
   const handleSpecChange = (msgId: string, field: string, value: any) => {
-    setMessages((prev) =>
-      prev.map((msg) => {
+    setMessages((prev) => {
+      const updated = prev.map((msg) => {
         if (msg.id === msgId && msg.spec) {
           return { ...msg, spec: { ...msg.spec, [field]: value } };
         }
         return msg;
-      })
-    );
+      });
+
+      if (currentDraftIdRef.current) {
+        const lastSpec = updated.slice().reverse().find((m) => m.spec)?.spec;
+        if (lastSpec) {
+          const updatedDraft = saveDraft({
+            id: currentDraftIdRef.current,
+            name: lastSpec.name || "Draf Agen",
+            description: lastSpec.description,
+            instructions: lastSpec.instructions,
+            model: lastSpec.model,
+            tools: lastSpec.tools,
+            mcp_servers: lastSpec.mcp_servers,
+            harness: lastSpec.harness,
+            messages: updated,
+          });
+          setActiveDraft(updatedDraft);
+        }
+      }
+
+      return updated;
+    });
   };
 
   const handleSaveSpec = async (spec: AgentSpecData) => {
@@ -336,6 +455,13 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
         try {
           localStorage.setItem(getStorageKey(savedSpec.id), JSON.stringify(updatedMessages));
         } catch { }
+      }
+
+      // Hapus dari draft store jika sebelumnya berstatus draf
+      if (currentDraftIdRef.current) {
+        deleteDraft(currentDraftIdRef.current);
+        currentDraftIdRef.current = undefined;
+        setActiveDraft(null);
       }
 
       // Save history to backend
@@ -410,14 +536,19 @@ export function BuildAgentChatPane({ activeAgent, onAgentCreated, onClearActiveA
         </div>
 
         <div className="flex items-center gap-2">
-          {activeAgent && (
+          {activeDraft ? (
+            <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 font-semibold border border-amber-200 flex items-center gap-1.5 shadow-2xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              <span>Draf: {activeDraft.name}</span>
+            </span>
+          ) : activeAgent ? (
             <span className="text-[11px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-medium border border-blue-200">
               Active: {activeAgent.name}
             </span>
-          )}
+          ) : null}
           <button
             onClick={handleReset}
-            title="Reset Prompt"
+            title="Reset / Buat Agent Baru"
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" />

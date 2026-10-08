@@ -30,7 +30,30 @@ export default function EvaluationPage() {
   const [agentTarget, setAgentTarget] = useState("BPJS Customer Service Agent");
 
   const [testCases, setTestCases] = useState<any[]>([]);
+  const [dbAgents, setDbAgents] = useState<{ id: string; name: string }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingAgents, setIsLoadingAgents] = useState(false);
+
+  const fetchAgents = async () => {
+    setIsLoadingAgents(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+      const res = await fetch(`${apiUrl}/api/v1/agent`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setDbAgents(data);
+          if (data.length > 0) {
+            setAgentTarget(data[0].name);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to fetch agents for evaluation:", err);
+    } finally {
+      setIsLoadingAgents(false);
+    }
+  };
 
   const fetchTestCases = async () => {
     setIsLoading(true);
@@ -49,6 +72,7 @@ export default function EvaluationPage() {
 
   useEffect(() => {
     fetchTestCases();
+    fetchAgents();
   }, []);
 
   const handleAddTestCase = async (e: React.FormEvent) => {
@@ -117,6 +141,23 @@ export default function EvaluationPage() {
     }
   };
 
+  const passedCount = testCases.filter((tc) => tc.status === "passed").length;
+  const passRate = testCases.length > 0 ? Math.round((passedCount / testCases.length) * 100) : 0;
+
+  const filteredTestCases = testCases.filter((tc) => {
+    const matchesSearch =
+      (tc.input && tc.input.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (tc.expected && tc.expected.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (tc.agent && tc.agent.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesAgent =
+      selectedAgent === "All Agents" ||
+      (tc.agent && tc.agent.toLowerCase() === selectedAgent.toLowerCase());
+    const matchesStatus =
+      selectedStatus === "All Statuses" ||
+      (tc.status && tc.status.toLowerCase() === selectedStatus.toLowerCase());
+    return matchesSearch && matchesAgent && matchesStatus;
+  });
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#fafbfe]">
       {/* 1. Fixed Sidebar Persisten */}
@@ -177,8 +218,12 @@ export default function EvaluationPage() {
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 Pass Rate
               </span>
-              <div className="text-xl font-bold text-emerald-600 mt-1">
-                {testCases.length > 0 ? "100%" : "0%"}
+              <div
+                className={`text-xl font-bold mt-1 ${
+                  passRate >= 80 ? "text-emerald-600" : passRate > 0 ? "text-amber-600" : "text-slate-400"
+                }`}
+              >
+                {testCases.length > 0 ? `${passRate}%` : "0%"}
               </div>
             </div>
 
@@ -206,21 +251,35 @@ export default function EvaluationPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="inline-flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-all shadow-2xs"
-              >
-                <span>{selectedAgent}</span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-              </button>
+              <div className="relative">
+                <select
+                  value={selectedAgent}
+                  onChange={(e) => setSelectedAgent(e.target.value)}
+                  className="appearance-none inline-flex items-center justify-between gap-2 px-3 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-all shadow-2xs outline-hidden cursor-pointer"
+                >
+                  <option value="All Agents">All Agents</option>
+                  {dbAgents.map((agent) => (
+                    <option key={agent.id} value={agent.name}>
+                      {agent.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+              </div>
 
-              <button
-                type="button"
-                className="inline-flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-all shadow-2xs"
-              >
-                <span>{selectedStatus}</span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-              </button>
+              <div className="relative">
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  className="appearance-none inline-flex items-center justify-between gap-2 px-3 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 transition-all shadow-2xs outline-hidden cursor-pointer"
+                >
+                  <option value="All Statuses">All Statuses</option>
+                  <option value="passed">Passed</option>
+                  <option value="failed">Failed</option>
+                  <option value="running">Running</option>
+                </select>
+                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+              </div>
             </div>
           </section>
 
@@ -239,13 +298,15 @@ export default function EvaluationPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
-                  {testCases.length === 0 ? (
+                  {filteredTestCases.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="py-16 text-center">
                         <div className="flex flex-col items-center justify-center text-slate-400">
                           <FlaskConical className="w-8 h-8 mb-2 text-slate-300 stroke-[1.5]" />
                           <p className="text-xs font-semibold text-slate-600">
-                            Belum ada test case evaluasi
+                            {testCases.length === 0
+                              ? "Belum ada test case evaluasi"
+                              : "Tidak ada test case yang cocok dengan filter"}
                           </p>
                           <p className="text-[11px] text-slate-400 mt-0.5 max-w-sm">
                             Tambahkan test case untuk menguji perilaku agent terhadap input tertentu (misal: pencarian RS, eskalasi, atau blokir data rahasia).
@@ -262,19 +323,35 @@ export default function EvaluationPage() {
                       </td>
                     </tr>
                   ) : (
-                    testCases.map((tc) => (
+                    filteredTestCases.map((tc) => (
                       <tr key={tc.id} className="hover:bg-slate-50/60 transition-colors">
                         <td className="py-3.5 px-6 font-semibold text-slate-900">
-                          &ldquo;{tc.input}&rdquo;
+                          <div>&ldquo;{tc.input}&rdquo;</div>
+                          {tc.agent && (
+                            <div className="text-[10px] text-blue-600 font-medium mt-0.5 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                              <span>Agent: {tc.agent}</span>
+                            </div>
+                          )}
                         </td>
                         <td className="py-3.5 px-6 font-mono text-[11px] text-slate-600">
                           {tc.expected}
                         </td>
                         <td className="py-3.5 px-6 font-mono text-[11px] text-slate-500">
-                          {tc.actual}
+                          {tc.actual || "-"}
                         </td>
                         <td className="py-3.5 px-4">
-                          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-100 text-slate-600">
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                              tc.status === "passed"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : tc.status === "failed"
+                                ? "bg-rose-50 text-rose-700 border-rose-200"
+                                : tc.status === "running"
+                                ? "bg-amber-50 text-amber-700 border-amber-200 animate-pulse"
+                                : "bg-slate-100 text-slate-600 border-slate-200"
+                            }`}
+                          >
                             {tc.status}
                           </span>
                         </td>
@@ -342,8 +419,17 @@ export default function EvaluationPage() {
                   onChange={(e) => setAgentTarget(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white"
                 >
-                  <option value="BPJS Customer Service Agent">BPJS Customer Service Agent</option>
-                  <option value="General Assistant Agent">General Assistant Agent</option>
+                  {dbAgents.length > 0 ? (
+                    dbAgents.map((agent) => (
+                      <option key={agent.id} value={agent.name}>
+                        {agent.name}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="BPJS Customer Service Agent">
+                      {isLoadingAgents ? "Memuat daftar agent..." : "BPJS Customer Service Agent"}
+                    </option>
+                  )}
                 </select>
               </div>
 

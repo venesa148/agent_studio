@@ -780,11 +780,22 @@ guardrails:
                 <select
                   value={activeAgent?.id || ""}
                   onChange={(e) => {
-                    const sel = agents.find((a) => a.id === e.target.value);
+                    const selVal = e.target.value;
+                    const sel = agents.find((a) => a.id === selVal);
                     if (sel && onSelectAgent) onSelectAgent(sel);
                   }}
                   className="w-full text-xs font-bold text-slate-800 bg-transparent pr-4 truncate outline-hidden cursor-pointer"
                 >
+                  {!activeAgent && (
+                    <option value="" disabled>
+                      -- Pilih Agent untuk Diuji --
+                    </option>
+                  )}
+                  {activeAgent && !agents.some((a) => a.id === activeAgent.id) && (
+                    <option value={activeAgent.id}>
+                      ⚡ [Draf] {activeAgent.name}
+                    </option>
+                  )}
                   {agents.map((agent) => (
                     <option key={agent.id} value={agent.id}>
                       {agent.name} ({agent.id.substring(0, 6)}...)
@@ -801,8 +812,16 @@ guardrails:
         </div>
 
         {activeAgent && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200 shrink-0">
-            ONLINE
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded-full font-bold border shrink-0 ${
+              activeAgent.id?.startsWith("draft_") || activeAgent.status === "draft"
+                ? "bg-amber-50 text-amber-700 border-amber-200"
+                : "bg-emerald-50 text-emerald-700 border-emerald-200"
+            }`}
+          >
+            {activeAgent.id?.startsWith("draft_") || activeAgent.status === "draft"
+              ? "DRAF"
+              : "ONLINE"}
           </span>
         )}
       </div>

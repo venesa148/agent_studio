@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -16,6 +16,7 @@ import {
   HelpCircle,
   Sparkles,
 } from "lucide-react";
+import { getDrafts, subscribeToDrafts, AgentDraft } from "@/lib/draftStore";
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -26,6 +27,31 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(collapsed);
   const [showWorkflowToast, setShowWorkflowToast] = useState(false);
+  const [dbAgents, setDbAgents] = useState<{ id: string; name: string }[]>([]);
+  const [drafts, setDrafts] = useState<AgentDraft[]>([]);
+
+  useEffect(() => {
+    setDrafts(getDrafts());
+    const unsubscribe = subscribeToDrafts((updated) => setDrafts(updated));
+
+    const fetchDbAgents = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+        const res = await fetch(`${apiUrl}/api/v1/agent`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            setDbAgents(data.slice(0, 5));
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    fetchDbAgents();
+
+    return () => unsubscribe();
+  }, []);
 
   const handleToggle = () => {
     setIsCollapsed(!isCollapsed);
@@ -37,7 +63,7 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
       name: "Agents",
       href: "/agents",
       icon: Bot,
-      count: 6,
+      count: dbAgents.length + drafts.length > 0 ? dbAgents.length + drafts.length : null,
       active: pathname === "/agents" || pathname === "/",
     },
     {
@@ -70,8 +96,6 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
       active: pathname === "/evaluation",
     },
   ];
-
-  const recentAgents: { name: string; tag?: string; isDot?: boolean }[] = [];
 
   return (
     <aside
@@ -159,37 +183,69 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
           })}
         </nav>
 
-        {/* Section: RECENT AGENTS */}
+        {/* Section: RECENT AGENTS & DRAFTS */}
         {!isCollapsed && (
-          <div className="pt-5 pb-2">
-            <div className="px-3 pb-2 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-              Recent Agents
-            </div>
-            {recentAgents.length > 0 ? (
-              <div className="space-y-0.5">
-                {recentAgents.map((agent) => (
-                  <button
-                    key={agent.name}
-                    className="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors text-left group"
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      {agent.isDot ? (
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                      ) : (
-                        <span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />
-                      )}
-                      <span className="truncate text-slate-700 group-hover:text-slate-900">
-                        {agent.name}
+          <div className="pt-4 pb-2 space-y-3">
+            {/* 1. Active Drafts if any */}
+            {drafts.length > 0 && (
+              <div>
+                <div className="px-3 pb-1.5 text-[10px] font-bold tracking-wider text-amber-700 uppercase flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    Draf Aktif
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.2 bg-amber-100 rounded text-amber-800 font-semibold">
+                    {drafts.length}
+                  </span>
+                </div>
+                <div className="space-y-0.5">
+                  {drafts.map((d) => (
+                    <Link
+                      key={d.id}
+                      href={`/?draft_id=${d.id}`}
+                      className="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs text-amber-950 bg-amber-50/60 hover:bg-amber-100/80 transition-colors text-left group"
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                        <span className="truncate font-medium">{d.name || "Draf Baru"}</span>
+                      </div>
+                      <span className="text-[10px] text-amber-700 shrink-0 font-medium">
+                        Lanjut
                       </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="px-3 py-1 text-[11px] text-slate-400">
-                Belum ada agent terbaru
+                    </Link>
+                  ))}
+                </div>
               </div>
             )}
+
+            {/* 2. Recent Saved Agents */}
+            <div>
+              <div className="px-3 pb-1.5 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                Recent Agents
+              </div>
+              {dbAgents.length > 0 ? (
+                <div className="space-y-0.5">
+                  {dbAgents.map((agent) => (
+                    <Link
+                      key={agent.id}
+                      href={`/?id=${agent.id}`}
+                      className="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors text-left group"
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                        <span className="truncate text-slate-700 group-hover:text-slate-900">
+                          {agent.name}
+                        </span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : drafts.length === 0 ? (
+                <div className="px-3 py-1 text-[11px] text-slate-400">
+                  Belum ada agent tersimpan
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
       </div>
