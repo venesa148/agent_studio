@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None
 
     # Individual DB parameters
-    DB_DRIVER: str = "mysql+aiomysql"
+    DB_DRIVER: str = "postgresql+asyncpg"
     DB_HOST: Optional[str] = None
-    DB_PORT: int = 4000
+    DB_PORT: int = 5432
     DB_USERNAME: Optional[str] = None
     DB_PASSWORD: Optional[str] = None
     DB_DATABASE: Optional[str] = None

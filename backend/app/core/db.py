@@ -19,17 +19,8 @@ if db_url.startswith("postgresql"):
     if db_url.startswith("postgresql://"):
         db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     engine_kwargs["connect_args"] = {"prepared_statement_cache_size": 0}
-elif db_url.startswith("mysql"):
-    if db_url.startswith("mysql://"):
-        db_url = db_url.replace("mysql://", "mysql+aiomysql://", 1)
 
 import ssl
-
-if "tidbcloud.com" in db_url:
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-    engine_kwargs.setdefault("connect_args", {})["ssl"] = ssl_context
 
 engine = create_async_engine(
     db_url,
@@ -71,6 +62,11 @@ async def init_db():
                 await conn.execute(text("ALTER TABLE tools ADD COLUMN health_status VARCHAR(50) DEFAULT 'healthy'"))
             if "used_by" not in cols:
                 await conn.execute(text("ALTER TABLE tools ADD COLUMN used_by VARCHAR(255) DEFAULT 'All agents'"))
+        
+        if "conversations" in tables:
+            cols = await conn.run_sync(lambda sync_conn: [c['name'] for c in inspect(sync_conn).get_columns("conversations")])
+            if "agent_id" not in cols:
+                await conn.execute(text("ALTER TABLE conversations ADD COLUMN agent_id VARCHAR(36) NULL"))
 
             # Pastikan MCP server lokal dan tools terdaftar di database
             import uuid

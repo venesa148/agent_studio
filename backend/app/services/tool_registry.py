@@ -134,13 +134,13 @@ class ToolRegistryService:
                         res_dict = data if isinstance(data, dict) else resp.json()
                         if isinstance(res_dict, dict):
                             res_dict["_endpoint"] = target_url
-                            res_dict["_source"] = "Live Web API Teman (MySQL)"
+                            res_dict["_source"] = "Live Web API Teman"
                         return res_dict
                     return {
                         "status": "error",
                         "error_type": "REMOTE_API_ERROR",
                         "_endpoint": target_url,
-                        "_source": "Live Web API Teman (MySQL)",
+                        "_source": "Live Web API Teman",
                         "message": f"Server eksternal mengembalikan HTTP status {resp.status_code} saat mengecek rujukan {ref_id}."
                     }
             except Exception as e:
@@ -167,9 +167,9 @@ class ToolRegistryService:
                         if data:
                             return {
                                 "city": city_raw,
-                                "source": "API Web Teman (MySQL)",
+                                "source": "API Web Teman",
                                 "_endpoint": target_url,
-                                "_source": "Live Web API Teman (MySQL)",
+                                "_source": "Live Web API Teman",
                                 "count": len(data),
                                 "hospitals": data
                             }
@@ -177,7 +177,7 @@ class ToolRegistryService:
                         "status": "error",
                         "error_type": "REMOTE_API_ERROR",
                         "_endpoint": target_url,
-                        "_source": "Live Web API Teman (MySQL)",
+                        "_source": "Live Web API Teman",
                         "message": f"Server faskes mengembalikan status {resp.status_code} saat mencari rumah sakit di {city_raw}."
                     }
             except Exception as e:
@@ -208,14 +208,14 @@ class ToolRegistryService:
                                 "city": city,
                                 "source": "API Web Teman",
                                 "_endpoint": target_url,
-                                "_source": "Live Web API Teman (MySQL)",
+                                "_source": "Live Web API Teman",
                                 "doctors": data
                             }
                     return {
                         "status": "error",
                         "error_type": "REMOTE_API_ERROR",
                         "_endpoint": target_url,
-                        "_source": "Live Web API Teman (MySQL)",
+                        "_source": "Live Web API Teman",
                         "message": f"Server direktori spesialis mengembalikan status {resp.status_code}."
                     }
             except Exception as e:
@@ -243,13 +243,13 @@ class ToolRegistryService:
                         if data:
                             if isinstance(data, dict):
                                 data["_endpoint"] = target_url
-                                data["_source"] = "Live Web API Teman (MySQL)"
+                                data["_source"] = "Live Web API Teman"
                             return data
                     return {
                         "status": "error",
                         "error_type": "REMOTE_API_ERROR",
                         "_endpoint": target_url,
-                        "_source": "Live Web API Teman (MySQL)",
+                        "_source": "Live Web API Teman",
                         "message": f"Server validasi kepesertaan mengembalikan kode {resp.status_code}."
                     }
             except Exception as e:
