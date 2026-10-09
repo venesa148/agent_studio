@@ -18,7 +18,10 @@ engine_kwargs = {
 if db_url.startswith("postgresql"):
     if db_url.startswith("postgresql://"):
         db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    engine_kwargs["connect_args"] = {"prepared_statement_cache_size": 0}
+    engine_kwargs["connect_args"] = {
+        "prepared_statement_cache_size": 0,
+        "statement_cache_size": 0
+    }
 
 import ssl
 
