@@ -72,7 +72,8 @@ class ChatbotService:
             model = ChatbotService.get_model(use_litellm=False)
             response = await client.chat.completions.create(
                 model=model,
-                messages=messages_for_llm
+                messages=messages_for_llm,
+                max_tokens=2000
             )
             assistant_content = response.choices[0].message.content or ""
         except Exception as primary_err:
@@ -83,7 +84,8 @@ class ChatbotService:
                     model = ChatbotService.get_model(use_litellm=True)
                     response = await client.chat.completions.create(
                         model=model,
-                        messages=messages_for_llm
+                        messages=messages_for_llm,
+                        max_tokens=2000
                     )
                     assistant_content = response.choices[0].message.content or ""
                 except Exception as fallback_err:

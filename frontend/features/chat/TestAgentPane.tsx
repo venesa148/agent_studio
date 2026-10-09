@@ -657,7 +657,7 @@ guardrails:
     setIsRunning(true);
 
     const chatController = new AbortController();
-    const chatTimeoutId = setTimeout(() => chatController.abort(), 30000); // 30 detik timeout
+    const chatTimeoutId = setTimeout(() => chatController.abort(), 90000); // 90 detik timeout untuk mengakomodasi multi-tool LLM loop
 
     try {
       const res = await fetch(`${apiUrl}/api/v1/agent/chat`, {
@@ -712,7 +712,7 @@ guardrails:
       console.warn("Error testing agent:", error);
       const errTxt =
         error.name === "AbortError"
-          ? "⏱️ Request timeout (30 detik). Backend lambat atau LLM tidak merespons. Pastikan OPENAI_API_KEY sudah diset di backend/.env"
+          ? "⏱️ Request timeout (90 detik). LLM remote atau tool eksternal membutuhkan waktu lebih lama untuk merespons."
           : error.message || "Maaf, terjadi kesalahan saat menghubungi Agent Backend.";
       setErrorMessage(errTxt);
       setMessages((prev) => [

@@ -18,20 +18,45 @@ class BuilderService:
     @staticmethod
     def _agent_name(prompt: str) -> str:
         cleaned = prompt.strip().rstrip(".!?")
+        
+        # 1. Deteksi pola eksplisit: "bernama [Nama Agent]" atau "nama [Nama Agent]"
+        named_match = re.search(
+            r"(?:bernama|nama(?:nya)?|called|named)\s+[\"\'\`]?([A-Za-z0-9\s/_-]+?)[\"\'\`]?(?:\s+(?:untuk|yang|guna|agar|dengan|sebagai)|\.|\,|$)",
+            cleaned,
+            re.IGNORECASE
+        )
+        if named_match:
+            candidate = named_match.group(1).strip()
+            if candidate and len(candidate.split()) <= 6:
+                name = candidate.title()
+                for acr in ["BPJS", "CS", "AI", "API", "IT", "RS", "IGD", "FKTP", "JKN"]:
+                    name = re.sub(rf"\b{acr.capitalize()}\b", acr, name)
+                return name
+
         lowered = cleaned.lower()
         prefixes = (
+            "ubah nama agent menjadi ", "ubah nama agen menjadi ", "ubah nama menjadi ",
+            "ganti nama agent menjadi ", "ganti nama agen menjadi ", "ganti nama menjadi ",
+            "rename agent to ", "rename to ",
+            "buatkan aku agent asisten ", "buatkan saya agent asisten ", "buatkan agent asisten ",
             "buatkan aku agent ", "buatkan saya agent ", "buatkan agent ",
-            "buat agent ", "create an agent ", "create agent ",
-            "buatkan ", "buat ", "create "
+            "buat agent asisten ", "buat agent ", "create an agent ", "create agent ",
+            "buatkan asisten ", "buatkan ", "buat ", "create "
         )
         for prefix in prefixes:
             if lowered.startswith(prefix):
                 cleaned = cleaned[len(prefix):].strip()
                 break
+
+        # Potong jika masih ada klausul penjelas seperti "untuk...", "guna..."
+        split_match = re.split(r"\s+(?:untuk|yang|guna|agar|sebagai)\s+", cleaned, flags=re.IGNORECASE)
+        if split_match and len(split_match[0].strip()) > 0:
+            cleaned = split_match[0].strip()
+
         if not cleaned:
             return "Custom AI Assistant"
-        name = cleaned[:255].title()
-        for acr in ["BPJS", "CS", "AI", "API", "IT", "RS", "IGD", "FKTP"]:
+        name = cleaned[:60].title()
+        for acr in ["BPJS", "CS", "AI", "API", "IT", "RS", "IGD", "FKTP", "JKN"]:
             name = re.sub(rf"\b{acr.capitalize()}\b", acr, name)
         return name
 
@@ -78,6 +103,7 @@ class BuilderService:
                         {"role": "system", "content": system_msg},
                         {"role": "user", "content": f"Kebutuhan agent: {prompt}"}
                     ],
+                    max_tokens=256,
                     temperature=0.0
                 )
                 content = completion.choices[0].message.content or ""
@@ -181,10 +207,16 @@ class BuilderService:
             
             messages = [{"role": "system", "content": system_msg}]
             if history:
-                for h in history:
+                # Batasi hanya 4 pesan riwayat terakhir agar payload ringan dan latensi rendah
+                recent_history = history[-4:] if len(history) > 4 else history
+                for h in recent_history:
+                    content_str = h.content if hasattr(h, 'role') else (h.get('content', '') if isinstance(h, dict) else str(h))
+                    if content_str and len(content_str) > 500:
+                        content_str = content_str[:500] + "..."
+                    role_str = h.role if hasattr(h, 'role') else (h.get('role', 'user') if isinstance(h, dict) else 'user')
                     messages.append({
-                        "role": h.role if hasattr(h, 'role') else h.get('role', 'user'),
-                        "content": h.content if hasattr(h, 'content') else h.get('content', '')
+                        "role": role_str,
+                        "content": content_str or ""
                     })
             
             messages.append({"role": "user", "content": prompt_trimmed})
@@ -193,7 +225,9 @@ class BuilderService:
                 completion = await client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    temperature=0.3
+                    temperature=0.2,
+                    max_tokens=2500,
+                    timeout=35.0
                 )
                 content = completion.choices[0].message.content or ""
                 match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
@@ -277,19 +311,31 @@ class BuilderService:
                 print(f"LLM Builder Error: {e}")
                 pass
 
-        # Fallback Logic (Naive jika LLM offline)
-        if current_spec and current_spec.id:
+        # Fallback Logic (jika LLM offline/timeout/error)
+        if current_spec:
             name = current_spec.name
-            description = current_spec.description or f"Agent untuk: {prompt_trimmed}"
-            instructions = "\n\n".join(
-                part for part in [current_spec.instructions or "", prompt_trimmed] if part
+            description = current_spec.description
+            instructions = current_spec.instructions
+            tools = [t for t in (current_spec.tools or []) if t in valid_db_tools]
+            mcp_servers = current_spec.mcp_servers or []
+            
+            # Cek apakah pengguna bermaksud mengubah nama agent
+            rename_match = re.search(
+                r"(?:ubah|ganti|rename)\s+(?:nama\s+)?(?:agent|agen)?\s*(?:menjadi|ke|to|jadi)\s+[:\"']?(.+?)[\"']?$",
+                prompt_trimmed,
+                re.IGNORECASE
             )
-            existing_tools = [t for t in (current_spec.tools or []) if t in valid_db_tools]
-            new_selected_tools = await BuilderService._select_tools_from_db(db, prompt_trimmed)
-            merged_tools = list(dict.fromkeys(existing_tools + new_selected_tools))
-            tools = merged_tools
-            mcp_servers = current_spec.mcp_servers
-            agent_model, harness, status = current_spec.model, current_spec.harness, current_spec.status
+            if rename_match:
+                raw_name = rename_match.group(1).strip()
+                name = BuilderService._agent_name(raw_name)
+                message_text = f"Nama agent berhasil diperbarui menjadi **{name}**."
+            else:
+                instructions = "\n\n".join(
+                    part for part in [instructions or "", prompt_trimmed] if part
+                )
+                new_selected_tools = await BuilderService._select_tools_from_db(db, prompt_trimmed)
+                tools = list(dict.fromkeys(tools + new_selected_tools))
+                message_text = f"Rancangan spesifikasi dan alur kerja untuk **{name}** telah diperbarui sesuai instruksi Anda."
             
             draft_spec = AgentSpec(
                 id=current_spec.id,
@@ -297,22 +343,49 @@ class BuilderService:
                 description=description,
                 instructions=instructions,
                 tools=tools,
-                model=agent_model,
+                model=current_spec.model or (settings.LLM_MODEL or "z-ai/glm-5.3"),
                 mcp_servers=mcp_servers,
-                harness=harness,
-                status=status
+                harness=current_spec.harness or "default-safe-v1",
+                status=current_spec.status or "draft"
             )
             return BuilderChatResponse(
                 id=current_spec.id, 
-                message=f"Rancangan spesifikasi dan alur kerja untuk **{name}** telah diperbarui sesuai instruksi Anda.", 
+                message=message_text, 
                 spec=draft_spec, 
                 is_draft=True
             )
         else:
             name = BuilderService._agent_name(prompt_trimmed)
-            description = f"Agent untuk: {prompt_trimmed}"
-            instructions = f"Peran dan tujuan agent ini berasal dari permintaan pengguna: {prompt_trimmed}\n\nJawab sesuai peran tersebut."
+            desc_match = re.search(r'(?:untuk|guna|tugasnya|bertugas)\s+(.+)$', prompt_trimmed, re.IGNORECASE)
+            if desc_match:
+                clean_action = desc_match.group(1).strip().rstrip('.!?')
+                description = f"Asisten virtual ({name}) yang bertugas {clean_action}."
+                clean_goal = clean_action
+            else:
+                cleaned_goal = re.sub(r'^(?:buatkan|bikin|buat|create)\s+(?:agent\s+)?(?:asisten\s+)?(?:bernama\s+[^\s]+\s+)?', '', prompt_trimmed, flags=re.IGNORECASE).strip()
+                description = f"Asisten virtual ({name}) untuk {cleaned_goal}."
+                clean_goal = cleaned_goal
+
             tools = await BuilderService._select_tools_from_db(db, prompt_trimmed)
+            
+            tool_rules = "\n".join([f"- Gunakan '{t}' sesuai kebutuhan alur pemeriksaan/layanan." for t in tools]) if tools else "- Gunakan tool yang tersedia untuk membantu pengguna."
+            
+            instructions = (
+                f"PERAN: Kamu adalah '{name}', asisten virtual profesional yang memandu pengguna secara ramah, empatik, dan terstruktur.\n\n"
+                f"TUJUAN UTAMA:\n"
+                f"{clean_goal}\n\n"
+                f"SOP & ALUR KERJA:\n"
+                f"1. Sambut pengguna dengan ramah, pahami keluhan atau kebutuhan yang disampaikan.\n"
+                f"2. Manfaatkan tools yang tersedia secara bertahap dan akurat berdasarkan data faskes/layanan resmi.\n"
+                f"3. Berikan rangkuman hasil dan panduan langkah selanjutnya yang jelas di setiap akhir pesan.\n\n"
+                f"BATASAN KEAMANAN:\n"
+                f"- Kamu BUKAN dokter; jangan memberikan diagnosis medis pasti atau meresepkan obat.\n"
+                f"- Untuk kondisi darurat medis, selalu prioritaskan arahan ke IGD terdekat tanpa menunda.\n"
+                f"- Dilarang mengarang informasi. Sampaikan apa adanya jika data tidak ditemukan.\n\n"
+                f"ATURAN PENGGUNAAN TOOL:\n"
+                f"{tool_rules}"
+            )
+            
             mcp_servers = []
             if tools:
                 t_query = await db.execute(

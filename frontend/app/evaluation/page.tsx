@@ -219,6 +219,10 @@ export default function EvaluationPage() {
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   TESTING & EVALUATION
                 </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-50 border border-purple-200/80 text-[10px] font-semibold text-purple-700">
+                  <Sparkles className="w-3 h-3 text-purple-500" />
+                  Judge: Grok 4.6 (Active)
+                </span>
               </div>
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
                 Evaluations & Tests
@@ -577,8 +581,11 @@ export default function EvaluationPage() {
                   <h3 className="text-sm font-bold text-slate-900">
                     Rapor Evaluasi (LLM as a Judge)
                   </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Target Agent: <span className="font-semibold text-slate-700">{selectedDetailTc.agent}</span>
+                  <p className="text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
+                    <span>Target Agent: <strong className="text-slate-700">{selectedDetailTc.agent}</strong></span>
+                    <span className="px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 text-purple-700 font-mono text-[10px]">
+                      Judge: {selectedDetailTc.details?.judge_model || "x-ai/grok-4.6"}
+                    </span>
                   </p>
                 </div>
               </div>

@@ -5,7 +5,7 @@ import json
 import re
 
 from openai import AsyncOpenAI
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -295,10 +295,13 @@ class AgentService:
         if not api_key:
             raise RuntimeError("API Key LLM belum dikonfigurasi. Silakan paste OPENROUTER_API_KEY atau LLM_API_KEY di file .env backend.")
 
-        # Tentukan nama model (default OpenRouter GLM-5.3: 'z-ai/glm-5.3')
-        model = settings.LLM_MODEL or "z-ai/glm-5.3"
-        if agent.model and agent.model not in ["gpt-4o-mini", "default"]:
-            model = agent.model
+        # Tentukan nama model (default ke settings.LLM_MODEL)
+        model = settings.LLM_MODEL or "z-ai/glm-5.3-flash"
+        if agent.model and agent.model not in ["gpt-4o-mini", "default", "z-ai/glm-5.3", "gemini-flash-lite-latest", "gemini-flash-latest"]:
+            if "googleapis.com" in settings.LLM_BASE_URL and "gemini" in agent.model:
+                model = agent.model
+            elif "openrouter.ai" in settings.LLM_BASE_URL and ("z-ai" in agent.model or "glm" in agent.model):
+                model = agent.model
 
         # Header dan penyesuaian khusus jika menggunakan OpenRouter
         if "openrouter.ai" in settings.LLM_BASE_URL:
@@ -323,9 +326,11 @@ class AgentService:
         """Mengambil seluruh riwayat pesan untuk agent ini dari database."""
         conv_title = f"test_session_{agent_id}"
         conv_res = await db.execute(
-            select(ConversationModel).where(ConversationModel.title == conv_title)
+            select(ConversationModel)
+            .where(ConversationModel.title == conv_title)
+            .order_by(ConversationModel.created_at.desc())
         )
-        conversation = conv_res.scalar_one_or_none()
+        conversation = conv_res.scalars().first()
         if not conversation:
             return []
         msg_res = await db.execute(
@@ -352,9 +357,11 @@ class AgentService:
         conv_res = await db.execute(
             select(ConversationModel).where(ConversationModel.title == conv_title)
         )
-        conversation = conv_res.scalar_one_or_none()
-        if conversation:
-            await db.delete(conversation)
+        conversations = conv_res.scalars().all()
+        if conversations:
+            for conv in conversations:
+                await db.execute(delete(MessageModel).where(MessageModel.conversation_id == conv.id))
+                await db.delete(conv)
             await db.commit()
             return True
         return False
@@ -422,9 +429,11 @@ class AgentService:
             # Setup working memory conversation
             conv_title = f"test_session_{agent_id}"
             conv_res = await db.execute(
-                select(ConversationModel).where(ConversationModel.title == conv_title)
+                select(ConversationModel)
+                .where(ConversationModel.title == conv_title)
+                .order_by(ConversationModel.created_at.desc())
             )
-            conversation = conv_res.scalar_one_or_none()
+            conversation = conv_res.scalars().first()
             if not conversation:
                 conversation = ConversationModel(user_id=agent_id, title=conv_title)
                 db.add(conversation)
@@ -479,9 +488,11 @@ class AgentService:
         # ======================================================================
         conv_title = f"test_session_{agent_id}"
         conv_res = await db.execute(
-            select(ConversationModel).where(ConversationModel.title == conv_title)
+            select(ConversationModel)
+            .where(ConversationModel.title == conv_title)
+            .order_by(ConversationModel.created_at.desc())
         )
-        conversation = conv_res.scalar_one_or_none()
+        conversation = conv_res.scalars().first()
         if not conversation:
             conversation = ConversationModel(user_id=agent_id, title=conv_title)
             db.add(conversation)
@@ -502,8 +513,11 @@ class AgentService:
         )
         history_messages = history_res.scalars().all()
 
+        # Sliding Window Memory: Batasi 8 pesan terakhir agar respon LLM tetap ringan dan tidak lag
+        recent_messages = history_messages[-8:] if len(history_messages) > 8 else history_messages
+
         messages_for_llm: List[Dict[str, Any]] = [{"role": "system", "content": system_message}]
-        for m in history_messages:
+        for m in recent_messages:
             messages_for_llm.append({"role": m.role, "content": m.content})
 
         # ======================================================================
@@ -518,6 +532,7 @@ class AgentService:
                 "model": model,
                 "messages": messages_for_llm,
                 "temperature": 0.7,
+                "max_tokens": 2500,
             }
             if openai_tools:
                 call_kwargs["tools"] = openai_tools
@@ -569,22 +584,28 @@ class AgentService:
                 break
 
             # Jika LLM meminta pemanggilan tool (Function Calling)
-            tool_calls_payload = []
-            for tc in active_tool_calls:
-                tool_calls_payload.append({
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments or "{}"
+            if hasattr(msg, "model_dump") and msg.tool_calls:
+                messages_for_llm.append(msg.model_dump(exclude_none=True))
+            else:
+                tool_calls_payload = []
+                for tc in active_tool_calls:
+                    tc_dict = {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments or "{}"
+                        }
                     }
-                })
+                    if hasattr(tc, "extra_content") and tc.extra_content:
+                        tc_dict["extra_content"] = tc.extra_content
+                    tool_calls_payload.append(tc_dict)
 
-            messages_for_llm.append({
-                "role": "assistant",
-                "content": msg.content or "",
-                "tool_calls": tool_calls_payload
-            })
+                messages_for_llm.append({
+                    "role": "assistant",
+                    "content": msg.content or "",
+                    "tool_calls": tool_calls_payload
+                })
 
             # Eksekusi setiap tool yang diminta oleh LLM secara dinamis
             for tc in active_tool_calls:

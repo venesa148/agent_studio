@@ -27,8 +27,9 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = "https://openrouter.ai/api/v1"
     LLM_MODEL: str = "z-ai/glm-5.3"
     LLM_API_KEY: str = ""
+    EVALUATOR_MODEL: str = "x-ai/grok-4.6"
 
-    EXTERNAL_MOCK_API_URL: str = "https://sisters-given-cloud-nerve.trycloudflare.com"
+    EXTERNAL_MOCK_API_URL: str = "https://golden-funny-scientific-undefined.trycloudflare.com"
     API_KEY_SECRET: str = "agent_studio_secret_key_2026"
     REQUIRE_API_KEY: bool = False
 

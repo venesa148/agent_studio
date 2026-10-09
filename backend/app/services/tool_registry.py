@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import or_, select
 from typing import List, Dict, Any, Optional
 import time
 import httpx
@@ -97,9 +97,33 @@ class ToolRegistryService:
                             api_base = mcp_srv.url
 
             if not api_base:
+                # Prioritaskan MCP Server yang secara spesifik melayani JKN / BPJS atau cloudflare tunnel
+                jkn_mcp_res = await db.execute(
+                    select(MCPServerModel).where(
+                        or_(
+                            MCPServerModel.name.ilike("%jkn%"),
+                            MCPServerModel.name.ilike("%bpjs%"),
+                            MCPServerModel.url.ilike("%trycloudflare.com%"),
+                            MCPServerModel.url.ilike("%mock-bpjs%")
+                        ),
+                        MCPServerModel.status == "connected",
+                        MCPServerModel.url.notlike("%/local-server%"),
+                        MCPServerModel.url.notlike("%localhost:8080%")
+                    ).order_by(MCPServerModel.updated_at.desc())
+                )
+                jkn_srv = jkn_mcp_res.scalars().first()
+                if jkn_srv and jkn_srv.url:
+                    api_base = jkn_srv.url
+
+            if not api_base:
                 ext_mcp_res = await db.execute(
                     select(MCPServerModel).where(
                         MCPServerModel.url.notlike("%/local-server%"),
+                        MCPServerModel.url.notlike("%notion%"),
+                        MCPServerModel.url.notlike("%github%"),
+                        MCPServerModel.url.notlike("%localhost:8080%"),
+                        MCPServerModel.name.notlike("%github%"),
+                        MCPServerModel.name.notlike("%notion%"),
                         MCPServerModel.status == "connected"
                     )
                 )
@@ -108,7 +132,7 @@ class ToolRegistryService:
                     api_base = ext_srv.url
 
         if not api_base:
-            api_base = getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "https://sisters-given-cloud-nerve.trycloudflare.com")
+            api_base = getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "https://golden-funny-scientific-undefined.trycloudflare.com")
 
         api_base = str(api_base).rstrip("/")
 
@@ -485,21 +509,29 @@ class ToolRegistryService:
             patient_name = str(params.get("patient_name") or params.get("name") or "Pasien").strip()
             hospital_name = str(params.get("hospital_name") or params.get("hospital") or "RS Mitra").strip()
             doctor_name = str(params.get("doctor_name") or params.get("doctor") or "dr. Spesialis").strip()
-            appt_date = str(params.get("date") or "2026-10-15").strip()
-            time_slot = str(params.get("time_slot") or "09:00 - 10:00 WIB").strip()
+            appt_date = str(params.get("date") or params.get("booking_date") or "2026-10-15").strip()
+            time_slot = str(params.get("time_slot") or params.get("session_time") or "09:00 - 10:00 WIB").strip()
+            poli = str(params.get("poli") or params.get("poliklinik") or params.get("specialty") or "Poli Penyakit Dalam").strip()
 
-            target_url = f"{api_base}/api/v1/mock-bpjs/appointments"
+            target_url = f"{api_base}/api/bookings"
             booking_payload = {
                 "patient_name": patient_name,
+                "poli": poli,
                 "hospital_name": hospital_name,
                 "doctor_name": doctor_name,
-                "date": appt_date,
-                "time_slot": time_slot
+                "booking_date": appt_date,
+                "session_time": time_slot,
+                "bpjs_number": str(params.get("bpjs_number") or params.get("number") or "1234567890123456")
             }
 
             try:
                 async with httpx.AsyncClient(timeout=6.0) as client:
-                    resp = await client.post(target_url, json=booking_payload)
+                    resp = await client.post(target_url, json=booking_payload, headers={"Accept": "application/json"})
+                    if resp.status_code == 404:
+                        # Fallback ke format legacy mock-bpjs jika ada
+                        target_url = f"{api_base}/api/v1/mock-bpjs/appointments"
+                        resp = await client.post(target_url, json=booking_payload)
+
                     if resp.status_code in [200, 201]:
                         data = resp.json()
                         res_data = data.get("data", data)
@@ -526,11 +558,15 @@ class ToolRegistryService:
 
         # 10. get_appointment
         elif tool_name == "get_appointment":
-            booking_id = str(params.get("booking_id") or params.get("id") or "").strip()
-            target_url = f"{api_base}/api/v1/mock-bpjs/appointments/{booking_id}"
+            booking_id = str(params.get("booking_id") or params.get("id") or params.get("booking_code") or "").strip()
+            target_url = f"{api_base}/api/bookings/{booking_id}"
             try:
                 async with httpx.AsyncClient(timeout=6.0) as client:
-                    resp = await client.get(target_url)
+                    resp = await client.get(target_url, headers={"Accept": "application/json"})
+                    if resp.status_code == 404:
+                        target_url = f"{api_base}/api/v1/mock-bpjs/appointments/{booking_id}"
+                        resp = await client.get(target_url)
+
                     if resp.status_code == 200:
                         data = resp.json()
                         res_data = data.get("data", data)

@@ -19,8 +19,8 @@ if db_url.startswith("postgresql"):
     if db_url.startswith("postgresql://"):
         db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     engine_kwargs["connect_args"] = {
+        "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
-        "statement_cache_size": 0
     }
 
 import ssl
@@ -78,20 +78,21 @@ async def init_db():
             if "details" not in cols:
                 await conn.execute(text("ALTER TABLE evaluations ADD COLUMN details JSON NULL"))
 
-            # Pastikan MCP server lokal dan tools terdaftar di database
+            # Pastikan MCP server live JKN Care terdaftar di database
             import uuid
             from datetime import datetime, timezone
 
-            local_mcp_id = None
+            mcp_id = None
             if "mcp_servers" in tables:
-                mcp_check = await conn.execute(text("SELECT id FROM mcp_servers WHERE url = :url"), {"url": "http://localhost:8000/api/v1/mcp/local-server"})
-                local_mcp_id = mcp_check.scalar()
-                if not local_mcp_id:
-                    local_mcp_id = str(uuid.uuid4())
+                live_url = (getattr(settings, "EXTERNAL_MOCK_API_URL", "https://golden-funny-scientific-undefined.trycloudflare.com") or "").rstrip("/") + "/"
+                mcp_check = await conn.execute(text("SELECT id FROM mcp_servers WHERE url LIKE '%trycloudflare.com%' OR (name ILIKE '%jkn%' AND url NOT LIKE '%local-server%')"))
+                mcp_id = mcp_check.scalar()
+                if not mcp_id:
+                    mcp_id = "3144f9ba-abc1-41de-a8b6-ec0c61369c72"
                     await conn.execute(
                         text("INSERT INTO mcp_servers (id, name, url, status, created_at, updated_at) "
                              "VALUES (:id, :name, :url, 'connected', :created_at, :updated_at)"),
-                        {"id": local_mcp_id, "name": "JKN Care Services MCP", "url": "http://localhost:8000/api/v1/mcp/local-server", "created_at": datetime.utcnow(), "updated_at": datetime.utcnow()}
+                        {"id": mcp_id, "name": "JKN Care Services MCP", "url": live_url, "created_at": datetime.utcnow(), "updated_at": datetime.utcnow()}
                     )
 
             default_builtin_tools = [
@@ -114,7 +115,7 @@ async def init_db():
                 check_t = await conn.execute(text("SELECT id FROM tools WHERE name = :name"), {"name": t_name})
                 if not check_t.scalar():
                     t_id = str(uuid.uuid4())
-                    mcp_srv_val = local_mcp_id if t_source == "mcp" else None
+                    mcp_srv_val = mcp_id if t_source == "mcp" else None
                     await conn.execute(
                         text("INSERT INTO tools (id, name, description, source_type, mcp_server_id, is_active, auth_custody, health_status, used_by, created_at) "
                              "VALUES (:id, :name, :description, :source_type, :mcp_server_id, TRUE, 'none', 'healthy', 'All agents', :created_at)"),

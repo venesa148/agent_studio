@@ -304,8 +304,21 @@ export function BuildAgentChatPane({
       });
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Gagal membangun agent dari backend.");
+        let errMessage = `HTTP Error ${res.status}`;
+        try {
+          const errorData = await res.json();
+          if (typeof errorData.detail === "string") {
+            errMessage = errorData.detail;
+          } else if (Array.isArray(errorData.detail)) {
+            errMessage = errorData.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ");
+          }
+        } catch {
+          const rawText = await res.text().catch(() => "");
+          if (rawText.includes("Gateway Timeout") || res.status === 504) {
+            errMessage = "Waktu tunggu habis (Gateway Timeout). Server LLM sedang lambat, silakan coba kirimkan prompt kembali.";
+          }
+        }
+        throw new Error(errMessage || "Gagal membangun agent dari backend.");
       }
 
       const data = await res.json();

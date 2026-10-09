@@ -29,26 +29,30 @@ class EvaluatorService:
         expected: str,
         actual_response: str,
         actual_tools: List[str],
-        tool_traces: List[Dict[str, Any]]
+        tool_traces: List[Dict[str, Any]],
+        agent_instructions: Optional[str] = None,
+        available_tools: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Memanggil LLM as a Judge untuk menilai respon agen dan pemanggilan tool.
         """
         client = None
-        model = None
-        if settings.OPENAI_API_KEY:
-            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=1)
-            model = settings.OPENAI_DEFAULT_MODEL
-        elif settings.LLM_API_KEY:
-            client = AsyncOpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL, max_retries=1)
-            model = settings.LLM_MODEL
+        eval_model = getattr(settings, "EVALUATOR_MODEL", None) or os.getenv("EVALUATOR_MODEL") or "x-ai/grok-4.6"
+        model = eval_model
+
+        if settings.LLM_API_KEY:
+            client = AsyncOpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL, max_retries=2)
+            model = eval_model
+        elif settings.OPENAI_API_KEY:
+            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=2)
+            model = eval_model or settings.OPENAI_DEFAULT_MODEL
 
         system_prompt = (
             "Anda adalah 'AI Quality Evaluator Agent', auditor independen bersertifikasi yang bertugas "
             "menilai kualitas respon dan pemanggilan tool dari AI Agent Layanan Kesehatan / BPJS Care.\n\n"
             "TUGAS ANDA:\n"
-            "Evaluasi kesesuaian antara [INPUT USER], [EXPECTED OUTCOME/TOOL], [ACTUAL TOOLS CALLED], "
-            "dan [ACTUAL AGENT RESPONSE] berdasarkan 5 METRIK BAKU:\n\n"
+            "Evaluasi kesesuaian antara [SYSTEM PROMPT], [TOOLS TERSEDIA], [INPUT USER], [EXPECTED OUTCOME/TOOL], "
+            "[ACTUAL TOOLS CALLED], [TOOL RESULTS/SUMBER INFORMASI], dan [ACTUAL AGENT RESPONSE] berdasarkan 5 METRIK BAKU:\n\n"
             "1. tool_accuracy (Bobot 30%, Skala 0-100):\n"
             "   - Tool Recall: Apakah tool yang diharapkan berhasil dipanggil?\n"
             "   - Tool Precision: Apakah tidak ada pemanggilan tool yang tidak relevan/mubazir?\n"
@@ -87,13 +91,19 @@ class EvaluatorService:
         )
 
         user_prompt = (
-            f"=== DATA EVALUASI TEST CASE ===\n"
+            f"=== 1. KONTEKS SISTEM & PERAN AGENT ===\n"
+            f"[SYSTEM PROMPT / INSTRUKSI AGENT]:\n{agent_instructions or 'Instruksi default asisten BPJS'}\n\n"
+            f"[TOOLS TERSEDIA]: {json.dumps(available_tools or [])}\n\n"
+            f"=== 2. INPUT PENGGUNA & KRITERIA ===\n"
             f"[INPUT USER]: {input_text}\n"
-            f"[EXPECTED OUTCOME / TOOL]: {expected}\n"
+            f"[EXPECTED OUTCOME / TOOL]: {expected}\n\n"
+            f"=== 3. EKSEKUSI TOOL & SUMBER INFORMASI ===\n"
             f"[ACTUAL TOOLS CALLED]: {json.dumps(actual_tools)}\n"
-            f"[TOOL EXECUTION RESULTS]: {json.dumps([t.get('result') for t in tool_traces if t.get('result')], ensure_ascii=False)[:1000]}\n"
+            f"[TOOL EXECUTION RESULTS / DATA RETURNED]: {json.dumps([t.get('result') for t in tool_traces if t.get('result')], ensure_ascii=False)[:1000]}\n\n"
+            f"=== 4. OUTPUT AKTUAL AGENT ===\n"
             f"[ACTUAL AGENT RESPONSE]:\n{actual_response}\n\n"
-            f"Silakan berikan penilaian objektif dalam format JSON di atas."
+            f"Berdasarkan seluruh konteks di atas (System Prompt, Tools, Input User, Data Tool, dan Output Aktual), "
+            f"berikan evaluasi objektif dalam format JSON di atas."
         )
 
         if client and model:
@@ -104,14 +114,17 @@ class EvaluatorService:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
+                    max_tokens=1500,
                     temperature=0.1
                 )
-                content = completion.choices[0].message.content or ""
+                choice_msg = completion.choices[0].message
+                content = choice_msg.content or getattr(choice_msg, "reasoning", "") or ""
                 match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
                 if not match:
                     match = re.search(r"({.*})", content, re.DOTALL)
                 if match:
                     parsed = json.loads(match.group(1).strip())
+                    parsed["judge_model"] = model
                     return parsed
             except Exception as e:
                 print(f"[EvaluatorService] LLM Judge call failed: {e}. Fallback to rule-based evaluation.")
@@ -273,7 +286,9 @@ class EvaluatorService:
             expected=eval_item.expected,
             actual_response=actual_text,
             actual_tools=actual_tools,
-            tool_traces=trace_steps
+            tool_traces=trace_steps,
+            agent_instructions=target_agent.instructions,
+            available_tools=target_agent.tools
         )
 
         judge_result["actual_tools"] = actual_tools
