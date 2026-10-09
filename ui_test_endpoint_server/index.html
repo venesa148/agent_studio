@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Studio - Live Endpoint Tester</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <!-- Marked.js untuk render Markdown yang rapi (tabel, list, bold) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Header & Configuration Bar -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a4 4 0 0 1 4 4c0 .8-.2 1.5-.7 2.1l1.7 1.7a2 2 0 0 1 0 2.8l-1.4 1.4a2 2 0 0 1-2.8 0L9.1 12.3A4 4 0 1 1 12 2z"></path>
+            <path d="m19 19-3-3"></path>
+            <path d="m5 19 3-3"></path>
+          </svg>
+        </div>
+        <div class="brand-info">
+          <h1>Agent Endpoint Tester</h1>
+          <p>Live Postman-like Chat Interface untuk Agen yang Sudah Dipublish</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="status-indicator" id="statusIndicator">
+          <span class="status-dot"></span>
+          <span class="status-text" id="statusText">Siap Mengirim</span>
+        </div>
+        <button id="btnToggleSettings" class="btn btn-outline" title="Konfigurasi Endpoint & Token">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          <span id="settingsToggleLabel">Sembunyikan Konfigurasi</span>
+        </button>
+        <button id="btnRawInspector" class="btn btn-outline" title="Lihat Raw JSON Request & Response">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+          <span>Raw JSON</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Collapsible Endpoint & Token Configuration Form -->
+    <section class="config-panel" id="configPanel">
+      <div class="config-grid">
+        <div class="config-field config-field-endpoint">
+          <label for="endpointInput">
+            <span class="label-title">Endpoint URL</span>
+            <span class="label-desc">URL HTTP POST invoke dari agent</span>
+          </label>
+          <div class="input-with-action">
+            <input 
+              type="text" 
+              id="endpointInput" 
+              placeholder="http://13.250.191.160:8080/agents/pandu-bpjs-sehattt/invoke"
+              autocomplete="off"
+            >
+            <button id="btnQuickLocal" class="btn-chip" type="button">Localhost</button>
+            <button id="btnQuickEC2" class="btn-chip" type="button">AWS EC2</button>
+          </div>
+        </div>
+
+        <div class="config-field">
+          <label for="tokenInput">
+            <span class="label-title">Bearer Token / API Key</span>
+            <span class="label-desc">Header Authorization: Bearer &lt;token&gt;</span>
+          </label>
+          <div class="input-with-action">
+            <input 
+              type="password" 
+              id="tokenInput" 
+              placeholder="agy_live_7f0e5c8c0fd8daac6d720fab"
+              autocomplete="off"
+            >
+            <button id="btnToggleTokenVisibility" class="btn-icon" type="button" title="Lihat / Sembunyikan Token">
+              👁️
+            </button>
+          </div>
+        </div>
+
+        <div class="config-field">
+          <label for="sessionIdInput">
+            <span class="label-title">Session ID</span>
+            <span class="label-desc">Konteks percakapan multi-turn</span>
+          </label>
+          <div class="input-with-action">
+            <input 
+              type="text" 
+              id="sessionIdInput" 
+              placeholder="sesi-postman-001"
+              autocomplete="off"
+            >
+            <button id="btnGenerateSession" class="btn-icon" type="button" title="Generate Session ID Baru">
+              🔄
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Chat Workspace -->
+    <main class="chat-container">
+      <!-- Chat Messages Scrollable Area -->
+      <div class="chat-messages" id="chatMessages">
+        <div class="welcome-card" id="welcomeCard">
+          <div class="welcome-badge">Tester Siap Digunakan</div>
+          <h2>Uji Coba Live Agent Anda</h2>
+          <p>
+            Ketik pesan di bawah untuk memanggil endpoint secara live. Request akan dikirim menggunakan 
+            metode <code>POST</code> dengan header <code>Authorization: Bearer &lt;Token&gt;</code> dan body JSON 
+            <code>{ "session_id": "...", "message": "..." }</code> persis seperti di Postman.
+          </p>
+          <div class="quick-prompts">
+            <span class="quick-title">Coba Pertanyaan Cepat:</span>
+            <button class="prompt-chip" data-prompt="Halo! Layanan apa saja yang bisa Anda bantu?">👋 Sapa Agen</button>
+            <button class="prompt-chip" data-prompt="Cek status rujukan BPJS saya atas nama Budi Santoso">📋 Cek Rujukan BPJS</button>
+            <button class="prompt-chip" data-prompt="Cari rumah sakit di Jakarta Selatan yang ada poli THT">🏥 Cari Rumah Sakit</button>
+            <button class="prompt-chip" data-prompt="Berapa harga perbaikan RAM laptop 8GB DDR4?">💻 Tes Pertanyaan Luar Domain</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Bottom Input Bar -->
+      <footer class="chat-input-area">
+        <form class="input-form" id="chatForm">
+          <div class="input-box-wrapper">
+            <textarea 
+              id="messageInput" 
+              placeholder="Ketik pesan untuk agen di sini... (Tekan Enter untuk kirim, Shift+Enter untuk baris baru)" 
+              rows="1"
+            ></textarea>
+            
+            <div class="input-controls">
+              <span class="session-badge" id="currentSessionDisplay">Sesi: default</span>
+              <button type="button" id="btnClearChat" class="btn-clear" title="Bersihkan Riwayat Chat">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18"></path>
+                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                </svg>
+                Hapus Chat
+              </button>
+              <button type="submit" id="btnSend" class="btn btn-primary">
+                <span>Kirim</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </form>
+      </footer>
+    </main>
+
+    <!-- Raw JSON Inspector Modal -->
+    <div class="modal-backdrop" id="inspectorModal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="16 18 22 12 16 6"></polyline>
+              <polyline points="8 6 2 12 8 18"></polyline>
+            </svg>
+            <h3>Raw Request & Response Inspector</h3>
+          </div>
+          <button class="modal-close" id="btnCloseInspector">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="inspector-tabs">
+            <button class="tab-btn active" data-tab="tab-req">Last Request (Sent)</button>
+            <button class="tab-btn" data-tab="tab-res">Last Response (Received)</button>
+            <button class="tab-btn" data-tab="tab-curl">cURL Command</button>
+          </div>
+          <div class="tab-content" id="tab-req">
+            <div class="code-toolbar">
+              <span class="code-tag">POST Payload</span>
+              <button class="btn-copy-code" id="btnCopyReq">Salin JSON</button>
+            </div>
+            <pre><code id="rawReqDisplay">// Belum ada request yang dikirim</code></pre>
+          </div>
+          <div class="tab-content hidden" id="tab-res">
+            <div class="code-toolbar">
+              <span class="code-tag" id="resStatusTag">HTTP Status</span>
+              <button class="btn-copy-code" id="btnCopyRes">Salin JSON</button>
+            </div>
+            <pre><code id="rawResDisplay">// Belum ada response yang diterima</code></pre>
+          </div>
+          <div class="tab-content hidden" id="tab-curl">
+            <div class="code-toolbar">
+              <span class="code-tag">Bash / cURL</span>
+              <button class="btn-copy-code" id="btnCopyCurl">Salin cURL</button>
+            </div>
+            <pre><code id="rawCurlDisplay"># cURL akan digenerate otomatis saat request dikirim</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
