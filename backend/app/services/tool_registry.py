@@ -217,15 +217,72 @@ class ToolRegistryService:
 
         # 3. find_specialist / search_doctors
         elif tool_name in ["find_specialist", "search_doctors"]:
-            specialty = str(params.get("specialty") or "Jantung").strip()
+            specialty = str(params.get("specialty") or "Penyakit Dalam").strip()
             city = str(params.get("city") or params.get("location") or params.get("hospital_name") or "Jakarta").strip()
-            target_url = f"{api_base}/api/v1/mock-bpjs/specialists"
-            
+            target_url = f"{api_base}/api/doctors/availability"
+
             try:
                 async with httpx.AsyncClient(timeout=6.0) as client:
-                    resp = await client.post(target_url, json={"specialty": specialty, "location": city})
+                    # 1. Coba ambil data dokter live dari basis data resmi web teman (/api/doctors/availability)
+                    resp = await client.get(target_url, headers={"Accept": "application/json"})
                     if resp.status_code == 200:
-                        data = resp.json().get("data", [])
+                        all_docs = resp.json().get("data", [])
+                        if isinstance(all_docs, list) and len(all_docs) > 0:
+                            spec_lower = specialty.lower()
+                            city_lower = city.lower()
+                            matched_doctors = []
+
+                            for d in all_docs:
+                                d_spec = (d.get("specialty_name") or "").lower()
+                                d_name = (d.get("doctor_name") or "").lower()
+                                d_hosp = (d.get("hospital_name") or "").lower()
+
+                                # Pencocokan spesialisasi yang akurat (gelar dan poli)
+                                match_spec = False
+                                if "mata" in spec_lower and ("mata" in d_spec or "sp.m" in d_name):
+                                    match_spec = True
+                                elif ("dalam" in spec_lower or "interna" in spec_lower) and ("dalam" in d_spec or "sp.pd" in d_name):
+                                    match_spec = True
+                                elif "anak" in spec_lower and ("anak" in d_spec or "sp.a" in d_name):
+                                    match_spec = True
+                                elif ("jantung" in spec_lower or "kardio" in spec_lower) and ("jantung" in d_spec or "sp.jp" in d_name):
+                                    match_spec = True
+                                elif "bedah" in spec_lower and ("bedah" in d_spec or "sp.b" in d_name):
+                                    match_spec = True
+                                elif spec_lower in d_spec or spec_lower in d_name:
+                                    match_spec = True
+
+                                if match_spec:
+                                    # Filter rumah sakit/lokasi jika spesifik
+                                    if not city_lower or city_lower == "jakarta" or any(w in d_hosp for w in city_lower.split()):
+                                        sched_list = [
+                                            f"{s.get('date')} ({s.get('start_time')}-{s.get('end_time')})"
+                                            for s in d.get("schedules", [])
+                                            if s.get("is_available")
+                                        ]
+                                        matched_doctors.append({
+                                            "nama_dokter": d.get("doctor_name"),
+                                            "spesialisasi": d.get("specialty_name"),
+                                            "rumah_sakit": d.get("hospital_name"),
+                                            "jadwal_praktek": ", ".join(sched_list[:2]) if sched_list else "Tersedia di faskes"
+                                        })
+
+                            if matched_doctors:
+                                return {
+                                    "specialty": specialty,
+                                    "city": city,
+                                    "source": "API Web Teman (Live Database)",
+                                    "_endpoint": target_url,
+                                    "_source": "Live Web API Teman (Database Dokter)",
+                                    "count": len(matched_doctors),
+                                    "doctors": matched_doctors[:6]
+                                }
+
+                    # 2. Fallback ke endpoint mock jika format live availability kosong
+                    target_url = f"{api_base}/api/v1/mock-bpjs/specialists"
+                    resp_mock = await client.post(target_url, json={"specialty": specialty, "location": city})
+                    if resp_mock.status_code == 200:
+                        data = resp_mock.json().get("data", [])
                         if data:
                             return {
                                 "specialty": specialty,
@@ -240,7 +297,7 @@ class ToolRegistryService:
                         "error_type": "REMOTE_API_ERROR",
                         "_endpoint": target_url,
                         "_source": "Live Web API Teman",
-                        "message": f"Server direktori spesialis mengembalikan status {resp.status_code}."
+                        "message": f"Server direktori spesialis mengembalikan status {resp_mock.status_code}."
                     }
             except Exception as e:
                 print(f"[Remote API Error] specialists call failed: {e}")
