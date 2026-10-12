@@ -51,7 +51,7 @@ session_memory: Dict[str, Dict[str, Any]] = {}
 # =============================================================================
 class InvokeRequest(BaseModel):
     session_id: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()))
-    message: str = Field(..., description="Pesan atau keluhan dari pasien/pengguna")
+    message: str = Field(..., description="Pesan atau input dari pengguna")
 
 
 class InvokeResponse(BaseModel):
@@ -150,108 +150,57 @@ class AgentRuntimeEngine:
             logger.error(f"[Engine Load Error] Gagal memuat YAML: {e}")
 
     async def execute_tool(self, tool_ref: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Eksekusi tool secara dinamis tanpa hardcode data fiktif."""
+        """
+        Generic Dynamic Tool Dispatcher:
+        - Mengeksekusi live HTTP/REST endpoints (GET, POST, PUT, DELETE) sesuai deklarasi tool di YAML.
+        - Meneruskan parameter dinamis dan custom auth headers secara universal tanpa hardcoded domain logic.
+        - Menyediakan built-in general utilities (DuckDuckGo Search, Safe Math Calculator, Current Datetime).
+        - Menangani unconfigured/mock tools secara graceful dan terstruktur.
+        """
         logger.info(f"[Runtime Tool Call] Menjalankan tool '{tool_ref}' dengan params: {params}")
         t_info = self.tools_by_ref.get(tool_ref, {})
         endpoint = t_info.get("endpoint")
         method = str(t_info.get("method") or "POST").upper()
 
-        # 1. Protokol Triase Klinis Standar (classify_complaint)
-        if tool_ref == "classify_complaint" or (endpoint and "classify_complaint" in endpoint):
-            complaint = str(params.get("complaint") or params.get("keluhan") or "").strip()
-            if not complaint:
-                return {"status": "error", "message": "Parameter 'complaint' tidak boleh kosong."}
-
-            complaint_lower = complaint.lower()
-            red_flags = ["pingsan", "sesak nafas", "nyeri dada hebat", "darurat", "kejang", "tidak sadar", "pendarahan hebat", "stroke", "lumpuh", "koma"]
-            matched_rf = [rf for rf in red_flags if rf in complaint_lower]
-            if matched_rf:
-                return {
-                    "status": "ok",
-                    "triage_class": "EMERGENCY",
-                    "red_flag": True,
-                    "matched_red_flags": matched_rf,
-                    "candidate_service": ["IGD / Instalasi Gawat Darurat"],
-                    "action": "ESCALATE_TO_EMERGENCY",
-                    "_source": "Clinical Triage Protocol",
-                    "_endpoint": "internal://triage/classify_complaint",
-                    "message": "Indikasi gawat darurat (Red Flag) terdeteksi. Segera arahkan pasien ke IGD rumah sakit terdekat atau hubungi 119."
-                }
-
-            ortho_kw = ["lutut", "sendi", "tulang", "patah", "keseleo", "otot", "kaki", "pinggang", "punggung", "tangan", "bahu"]
-            jantung_kw = ["jantung", "dada", "debar", "koroner", "aritmia"]
-            internis_kw = ["lambung", "maag", "ulu hati", "mual", "muntah", "perut", "penyakit dalam", "gerd", "diare"]
-            mata_kw = ["mata", "kabur", "katarak", "minus", "silinder"]
-            gigi_kw = ["gigi", "gusi", "geraham", "tambal", "cabut gigi"]
-            anak_kw = ["bayi", "balita", "anak", "imunisasi", "tumbuh kembang"]
-
-            poli = "Poli Umum FKTP"
-            if any(k in complaint_lower for k in ortho_kw):
-                poli = "Poli Orthopaedi & Bedah Tulang"
-            elif any(k in complaint_lower for k in jantung_kw):
-                poli = "Poli Jantung & Pembuluh Darah"
-            elif any(k in complaint_lower for k in internis_kw):
-                poli = "Poli Penyakit Dalam"
-            elif any(k in complaint_lower for k in mata_kw):
-                poli = "Poli Mata"
-            elif any(k in complaint_lower for k in gigi_kw):
-                poli = "Poli Gigi & Mulut"
-            elif any(k in complaint_lower for k in anak_kw):
-                poli = "Poli Anak"
-
-            return {
-                "status": "ok",
-                "triage_class": "NEED_FURTHER_CARE",
-                "red_flag": False,
-                "recommended_specialty": poli,
-                "candidate_service": [poli, "Poli Umum FKTP"],
-                "requires_eligibility_check": True,
-                "_source": "Clinical Triage Protocol",
-                "_endpoint": "internal://triage/classify_complaint"
-            }
-
-        # 2. Live REST API / MCP HTTP Endpoint Runner (Dinamis sesuai file YAML)
+        # 1. Live HTTP/REST Web API & MCP HTTP Runner (100% Dinamis & Universal)
         if endpoint and (endpoint.startswith("http://") or endpoint.startswith("https://")):
             headers = {"Content-Type": "application/json"}
-            auth_secret = t_info.get("auth_secret_ref")
+            
+            # Auth header dinamis jika ada
+            auth_secret = t_info.get("auth_secret_ref") or t_info.get("api_key")
             if auth_secret:
                 headers["Authorization"] = f"Bearer {auth_secret}"
+            
+            # Custom headers tambahan dari spesifikasi tool di YAML
+            if isinstance(t_info.get("headers"), dict):
+                headers.update(t_info["headers"])
 
-            # Normalisasi parameter input payload
-            norm_params = dict(params)
-            if "hospital_name" in norm_params and "location" not in norm_params:
-                norm_params["location"] = norm_params["hospital_name"]
-            if "city" in norm_params and "location" not in norm_params:
-                norm_params["location"] = norm_params["city"]
-            if "bpjs_number" in norm_params and "number" not in norm_params:
-                norm_params["number"] = norm_params["bpjs_number"]
-            if "bpjs_number" in norm_params and "bpjs_id" not in norm_params:
-                norm_params["bpjs_id"] = norm_params["bpjs_number"]
-            if "bpjs_id" in norm_params and "number" not in norm_params:
-                norm_params["number"] = norm_params["bpjs_id"]
-            if "participant_id" in norm_params and "number" not in norm_params:
-                norm_params["number"] = norm_params["participant_id"]
-            if "referral_number" in norm_params and "referral_no" not in norm_params:
-                norm_params["referral_no"] = norm_params["referral_number"]
-            if "referral_number" in norm_params and "referral_id" not in norm_params:
-                norm_params["referral_id"] = norm_params["referral_number"]
-            if "referral_id" in norm_params and "referral_no" not in norm_params:
-                norm_params["referral_no"] = norm_params["referral_id"]
+            timeout_sec = float(t_info.get("timeout", 10.0))
 
             try:
-                async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                async with httpx.AsyncClient(timeout=timeout_sec, follow_redirects=True) as client:
                     if method == "GET":
-                        resp = await client.get(endpoint, params=norm_params, headers=headers)
+                        resp = await client.get(endpoint, params=params, headers=headers)
+                    elif method in ("PUT", "PATCH"):
+                        resp = await client.request(method, endpoint, json=params, headers=headers)
+                    elif method == "DELETE":
+                        resp = await client.delete(endpoint, params=params, headers=headers)
                     else:
-                        resp = await client.post(endpoint, json=norm_params, headers=headers)
+                        resp = await client.post(endpoint, json=params, headers=headers)
 
-                    if resp.status_code == 200:
-                        body = resp.json()
+                    if 200 <= resp.status_code < 300:
+                        try:
+                            body = resp.json()
+                        except Exception:
+                            body = {"text": resp.text}
+
                         data = body.get("data", body) if isinstance(body, dict) else body
-                        logger.info(f"[Live HTTP Tool OK] {tool_ref} -> 200 OK")
+                        logger.info(f"[Live HTTP Tool OK] {tool_ref} -> {resp.status_code}")
+                        
+                        source_label = t_info.get("mcp_server_name") or t_info.get("source_type") or "Live Web API"
                         if isinstance(data, dict):
                             data["_endpoint"] = endpoint
-                            data["_source"] = t_info.get("mcp_server_name") or "Live Web API"
+                            data["_source"] = source_label
                             return data
                         elif isinstance(data, list):
                             return {
@@ -259,9 +208,9 @@ class AgentRuntimeEngine:
                                 "count": len(data),
                                 "items": data,
                                 "_endpoint": endpoint,
-                                "_source": t_info.get("mcp_server_name") or "Live Web API"
+                                "_source": source_label
                             }
-                        return {"status": "ok", "result": data, "_endpoint": endpoint}
+                        return {"status": "ok", "result": data, "_endpoint": endpoint, "_source": source_label}
                     else:
                         logger.warning(f"[Live HTTP Tool Status {resp.status_code}] {tool_ref}: {resp.text[:200]}")
                         return {
@@ -278,10 +227,10 @@ class AgentRuntimeEngine:
                     "error_type": "SERVICE_UNAVAILABLE",
                     "_endpoint": endpoint,
                     "_source": t_info.get("mcp_server_name") or "Live Web API (Offline)",
-                    "message": f"Server live API ({endpoint}) sedang offline atau tidak dapat dijangkau: {str(e)}"
+                    "message": f"Server live API ({endpoint}) tidak dapat dijangkau: {str(e)}"
                 }
 
-        # 3. Live Web Search (DuckDuckGo Search)
+        # 2. General Utility: Live Web Search (DuckDuckGo Search)
         if tool_ref in ["search_web", "web_search"]:
             query = str(params.get("query") or params.get("q") or "").strip()
             if not query:
@@ -304,8 +253,8 @@ class AgentRuntimeEngine:
                 logger.warning(f"[Web Search Warning] {e_search}")
             return {"status": "error", "query": query, "message": "Layanan pencarian web sedang tidak dapat memuat hasil."}
 
-        # 4. Safe Math Calculator
-        if tool_ref in ["calculator", "math_eval"]:
+        # 3. General Utility: Safe Math Calculator
+        if tool_ref in ["calculator", "math_eval", "calculate"]:
             expr = str(params.get("expression") or params.get("expr") or "").strip()
             if not expr:
                 return {"status": "error", "message": "Parameter 'expression' tidak boleh kosong."}
@@ -325,6 +274,19 @@ class AgentRuntimeEngine:
                 return {"status": "ok", "expression": expr, "result": val, "_endpoint": "internal://calculator"}
             except Exception as e_calc:
                 return {"status": "error", "expression": expr, "message": f"Gagal menghitung: {str(e_calc)}"}
+
+        # 4. General Utility: Current Datetime
+        if tool_ref in ["get_current_time", "get_current_date", "current_datetime"]:
+            from datetime import datetime
+            now = datetime.now()
+            return {
+                "status": "ok",
+                "datetime": now.isoformat(),
+                "formatted": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "date": now.strftime("%Y-%m-%d"),
+                "time": now.strftime("%H:%M:%S"),
+                "_endpoint": "internal://datetime"
+            }
 
         # 5. Generic Unconfigured Tool
         return {
@@ -478,7 +440,7 @@ class AgentRuntimeEngine:
                     "role": "user",
                     "content": (
                         "Tolong rangkum semua data yang sudah kamu peroleh dari tools di atas ke dalam format jawaban yang "
-                        "sangat ramah, empatik, terstruktur, serta sampaikan langkah selanjutnya dengan jelas kepada pasien."
+                        "jelas, solutif, terstruktur, dan ramah sesuai dengan peran dan instruksi kamu kepada pengguna."
                     )
                 })
                 synth_res = await client.chat.completions.create(
