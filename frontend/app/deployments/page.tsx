@@ -110,7 +110,7 @@ export default function DeploymentsPage() {
   const curlSnippet = `curl -X POST "${sampleEndpoint}" \\
   -H "Authorization: Bearer ${apiKey}" \\
   -H "Content-Type: application/json" \\
-  -d '{"message": "Cari RS BPJS di Jakarta", "session_id": "ses-101"}'`;
+  -d '{"message": "Halo, tolong bantu cek status pesanan saya", "session_id": "ses-101"}'`;
 
   const jsSnippet = `const response = await fetch("${sampleEndpoint}", {
   method: "POST",
@@ -119,7 +119,7 @@ export default function DeploymentsPage() {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    message: "Cari RS BPJS di Jakarta",
+    message: "Halo, tolong bantu cek status pesanan saya",
     session_id: "ses-101"
   })
 });
@@ -130,7 +130,7 @@ const data = await response.json();`;
 res = requests.post(
     "${sampleEndpoint}",
     headers={"Authorization": "Bearer ${apiKey}"},
-    json={"message": "Cari RS BPJS di Jakarta", "session_id": "ses-101"}
+    json={"message": "Halo, tolong bantu cek status pesanan saya", "session_id": "ses-101"}
 )
 print(res.json())`;
 

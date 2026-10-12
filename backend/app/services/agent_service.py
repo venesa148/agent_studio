@@ -1,14 +1,16 @@
 import os
+import time
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 import json
 import re
 
 from openai import AsyncOpenAI
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.builder_engine import execute_http, check_guardrails
 from app.models.agent import AgentSpecModel
 from app.models.chat import ConversationModel, MessageModel
 from app.models.tool import ToolModel
@@ -17,70 +19,6 @@ from app.schemas.agent import AgentSpecCreate, AgentSpecUpdate, AgentTestRespons
 from app.services.tool_registry import ToolRegistryService
 
 DEFAULT_BUILTIN_SCHEMAS: Dict[str, Dict[str, Any]] = {
-    "check_bpjs": {
-        "type": "object",
-        "properties": {
-            "bpjs_id": {
-                "type": "string",
-                "description": "Nomor kartu BPJS atau ID peserta (contoh: 000123456789)"
-            }
-        },
-        "required": ["bpjs_id"]
-    },
-    "search_hospital": {
-        "type": "object",
-        "properties": {
-            "city": {
-                "type": "string",
-                "description": "Nama kota lokasi rumah sakit (contoh: Jakarta, Bandung, Surabaya)"
-            },
-            "bpjs_only": {
-                "type": "boolean",
-                "description": "Hanya tampilkan rumah sakit rekanan BPJS",
-                "default": True
-            }
-        },
-        "required": ["city"]
-    },
-    "hospital_finder": {
-        "type": "object",
-        "properties": {
-            "city": {
-                "type": "string",
-                "description": "Nama kota lokasi rumah sakit"
-            },
-            "bpjs_only": {
-                "type": "boolean",
-                "description": "Hanya tampilkan rumah sakit rekanan BPJS",
-                "default": True
-            }
-        },
-        "required": ["city"]
-    },
-    "find_specialist": {
-        "type": "object",
-        "properties": {
-            "specialty": {
-                "type": "string",
-                "description": "Poli atau keahlian spesialis dokter (contoh: Penyakit Dalam, Jantung, Mata, Anak)"
-            },
-            "city": {
-                "type": "string",
-                "description": "Nama kota lokasi fasilitas kesehatan"
-            }
-        },
-        "required": ["specialty"]
-    },
-    "get_referral_status": {
-        "type": "object",
-        "properties": {
-            "referral_id": {
-                "type": "string",
-                "description": "Nomor surat rujukan peserta BPJS (contoh: RJ-001 atau RJ-9999)"
-            }
-        },
-        "required": ["referral_id"]
-    },
     "search_web": {
         "type": "object",
         "properties": {
@@ -116,90 +54,6 @@ DEFAULT_BUILTIN_SCHEMAS: Dict[str, Dict[str, Any]] = {
             }
         },
         "required": ["url"]
-    },
-    "classify_complaint": {
-        "type": "object",
-        "properties": {
-            "complaint": {
-                "type": "string",
-                "description": "Keluhan, gejala kesehatan, atau pertanyaan yang disampaikan pengguna"
-            }
-        },
-        "required": ["complaint"]
-    },
-    "get_participant_status": {
-        "type": "object",
-        "properties": {
-            "participant_id": {
-                "type": "string",
-                "description": "Nomor kartu BPJS/JKN atau NIK peserta (contoh: 000123456789)"
-            }
-        },
-        "required": ["participant_id"]
-    },
-    "search_hospitals": {
-        "type": "object",
-        "properties": {
-            "city": {
-                "type": "string",
-                "description": "Nama kota fasilitas kesehatan (contoh: Jakarta, Bandung, Surabaya)"
-            },
-            "service": {
-                "type": "string",
-                "description": "Poli atau layanan medis yang dicari (contoh: Orthopaedi, Penyakit Dalam)"
-            }
-        },
-        "required": ["city"]
-    },
-    "search_doctors": {
-        "type": "object",
-        "properties": {
-            "hospital_name": {
-                "type": "string",
-                "description": "Nama rumah sakit tujuan"
-            },
-            "specialty": {
-                "type": "string",
-                "description": "Spesialisasi atau poli dokter (contoh: Orthopaedi, Jantung, Anak)"
-            }
-        },
-        "required": ["hospital_name", "specialty"]
-    },
-    "create_appointment": {
-        "type": "object",
-        "properties": {
-            "patient_name": {
-                "type": "string",
-                "description": "Nama lengkap pasien"
-            },
-            "hospital_name": {
-                "type": "string",
-                "description": "Nama rumah sakit tujuan"
-            },
-            "doctor_name": {
-                "type": "string",
-                "description": "Nama dokter yang dipilih"
-            },
-            "date": {
-                "type": "string",
-                "description": "Tanggal appointment (format: YYYY-MM-DD)"
-            },
-            "time_slot": {
-                "type": "string",
-                "description": "Slot jam janji temu (contoh: 09:00 - 10:00 WIB)"
-            }
-        },
-        "required": ["patient_name", "hospital_name", "doctor_name", "date"]
-    },
-    "get_appointment": {
-        "type": "object",
-        "properties": {
-            "booking_id": {
-                "type": "string",
-                "description": "Nomor booking atau kode tiket antrean"
-            }
-        },
-        "required": ["booking_id"]
     }
 }
 
@@ -398,7 +252,11 @@ class AgentService:
         openai_tools = None
         if db_agent.tools and len(db_agent.tools) > 0:
             tool_res = await db.execute(
-                select(ToolModel).where(ToolModel.name.in_(db_agent.tools), ToolModel.is_active == True)
+                select(ToolModel).where(
+                    ToolModel.name.in_(db_agent.tools),
+                    ToolModel.is_active == True,
+                    or_(ToolModel.status == "published", ToolModel.status.is_(None))
+                )
             )
             active_tools = tool_res.scalars().all()
             if active_tools:
@@ -616,27 +474,49 @@ class AgentService:
                     fn_args = {}
 
                 try:
-                    tool_exec = await ToolRegistryService.execute_tool(db, fn_name, fn_args)
-                    tool_result = tool_exec.get("result", tool_exec)
-                    duration_ms = tool_exec.get("duration_ms", 0)
+                    # Cek apakah tool memiliki konfigurasi deklaratif dari builder_engine (Tool Factory)
+                    t_spec_res = await db.execute(select(ToolModel).where(ToolModel.name == fn_name))
+                    t_spec_obj = t_spec_res.scalar_one_or_none()
+                    
+                    if t_spec_obj and t_spec_obj.implementation and t_spec_obj.implementation.get("type") == "http":
+                        # Jalankan via Safe Egress HTTP Executor (builder_agent_core)
+                        t_http_spec = {
+                            "name": t_spec_obj.name,
+                            "description": t_spec_obj.description or "",
+                            "input_schema": t_spec_obj.input_schema or {},
+                            "implementation": t_spec_obj.implementation,
+                            "effect": t_spec_obj.effect or "read"
+                        }
+                        allowed_hosts = ["*.trycloudflare.com", "trycloudflare.com", "localhost", "127.0.0.1", "*"]
+                        start_time = time.time()
+                        exec_res = execute_http(t_http_spec, fn_args, vault={}, allowed_hosts=allowed_hosts)
+                        duration_ms = int((time.time() - start_time) * 1000)
+                        
+                        if exec_res.get("ok"):
+                            tool_result = exec_res.get("data", exec_res)
+                            if isinstance(tool_result, dict):
+                                tool_result["_endpoint"] = t_spec_obj.implementation.get("url")
+                                tool_result["_source"] = "Declarative HTTP Executor (Core Engine)"
+                        else:
+                            tool_result = {"status": "error", "message": f"Eksekusi HTTP tool gagal: {exec_res.get('error')}"}
+                    else:
+                        # Fallback ke built-in / live API registry
+                        tool_exec = await ToolRegistryService.execute_tool(db, fn_name, fn_args)
+                        tool_result = tool_exec.get("result", tool_exec)
+                        duration_ms = tool_exec.get("duration_ms", 0)
                 except Exception as err:
                     tool_result = {"status": "error", "message": f"Eksekusi tool '{fn_name}' gagal: {str(err)}"}
                     duration_ms = 0
 
-                # Deteksi target endpoint live API
-                api_base = (getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "")).rstrip("/")
-                endpoint_url = {
-                    "check_bpjs": f"{api_base}/api/v1/mock-bpjs/check-bpjs" if api_base else None,
-                    "get_referral_status": f"{api_base}/api/v1/mock-bpjs/referral-status" if api_base else None,
-                    "search_hospital": f"{api_base}/api/v1/mock-bpjs/hospitals" if api_base else None,
-                    "hospital_finder": f"{api_base}/api/v1/mock-bpjs/hospitals" if api_base else None,
-                    "find_specialist": f"{api_base}/api/v1/mock-bpjs/specialists" if api_base else None,
-                }.get(fn_name)
+                # Deteksi target endpoint live API / deklaratif
+                endpoint_url = None
+                if isinstance(tool_result, dict) and tool_result.get("_endpoint"):
+                    endpoint_url = tool_result.get("_endpoint")
+                elif t_spec_obj and t_spec_obj.implementation and isinstance(t_spec_obj.implementation, dict):
+                    endpoint_url = t_spec_obj.implementation.get("url")
 
                 source_name = "Local Service"
                 if isinstance(tool_result, dict):
-                    if tool_result.get("_endpoint"):
-                        endpoint_url = tool_result.get("_endpoint")
                     if tool_result.get("_source"):
                         source_name = tool_result.get("_source")
                     elif endpoint_url:
@@ -694,11 +574,7 @@ class AgentService:
 
         if escalation_reasons:
             final_status = "escalated"
-            agent_lower_name = (db_agent.name or "").lower()
-            if "bpjs" in agent_lower_name or "kesehatan" in agent_lower_name:
-                escalation_dest = "BPJS Care Center 165 / Petugas Faskes Terkait"
-            else:
-                escalation_dest = f"Tim Dukungan Layanan ({db_agent.name}) / Operator Manusia"
+            escalation_dest = f"Tim Dukungan Layanan ({db_agent.name}) / Operator Manusia"
 
             trace_steps.append({
                 "step": len(trace_steps) + 1,
@@ -763,146 +639,77 @@ class AgentService:
         if not active_api_base:
             active_api_base = (getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "")).rstrip("/")
 
-        # Endpoint mapping deklaratif untuk tool standar BPJS / sistem
-        tool_endpoint_defs: Dict[str, Dict[str, Any]] = {
-            "check_bpjs": {
-                "path": "/api/v1/mock-bpjs/check-bpjs",
-                "method": "POST",
-                "purpose": "Validasi status kepesertaan, NIK, dan nomor kartu BPJS Kesehatan secara real-time",
-            },
-            "get_participant_status": {
-                "path": "/api/v1/mock-bpjs/check-bpjs",
-                "method": "POST",
-                "purpose": "Cek keaktifan nomor kartu BPJS atau NIK peserta",
-            },
-            "get_referral_status": {
-                "path": "/api/v1/mock-bpjs/referral-status",
-                "method": "POST",
-                "purpose": "Verifikasi keabsahan, masa berlaku, dan tujuan faskes dari surat rujukan BPJS",
-            },
-            "search_hospital": {
-                "path": "/api/v1/mock-bpjs/hospitals",
-                "method": "POST",
-                "purpose": "Pencarian rumah sakit rekanan BPJS Kesehatan berdasarkan nama kota/wilayah",
-            },
-            "hospital_finder": {
-                "path": "/api/v1/mock-bpjs/hospitals",
-                "method": "POST",
-                "purpose": "Mencari fasilitas kesehatan dan rumah sakit terdekat sesuai lokasi pengguna",
-            },
-            "search_hospitals": {
-                "path": "/api/v1/mock-bpjs/hospitals",
-                "method": "POST",
-                "purpose": "Mencari rumah sakit rekanan BPJS dengan layanan dan poli tertentu",
-            },
-            "find_specialist": {
-                "path": "/api/v1/mock-bpjs/specialists",
-                "method": "POST",
-                "purpose": "Mencari dokter spesialis di rumah sakit berdasarkan poliklinik dan kota",
-            },
-            "search_doctors": {
-                "path": "/api/v1/mock-bpjs/specialists",
-                "method": "POST",
-                "purpose": "Cek jadwal dan daftar dokter spesialis di fasilitas kesehatan tertentu",
-            },
-            "create_appointment": {
-                "path": "/api/v1/mock-bpjs/appointments",
-                "method": "POST",
-                "purpose": "Reservasi tiket antrean atau pendaftaran jadwal konsultasi dokter",
-            },
-            "get_appointment": {
-                "path": "/api/v1/mock-bpjs/appointments",
-                "method": "GET",
-                "purpose": "Cek status tiket booking dan nomor antrean pasien",
-            },
-            "mcp_hospital_doctor_search": {
-                "path": "/api/v1/mock-bpjs/specialists",
-                "method": "POST",
-                "purpose": "Mencari dokter spesialis rekanan BPJS yang sesuai keluhan pasien",
-            },
-            "mcp_calendar_booking": {
-                "path": "/api/v1/mock-bpjs/appointments",
-                "method": "POST",
-                "purpose": "Menjadwalkan janji temu pasien dengan dokter dan menerbitkan nomor antrean",
-            },
-            "classify_complaint": {
-                "path": "internal://triage/classify_complaint",
-                "method": "INTERNAL",
-                "purpose": "Klasifikasi keluhan pasien dan penapisan darurat medis (Emergency Red Flag)",
-            },
-            "search_web": {
-                "path": "https://duckduckgo.com",
-                "method": "GET",
-                "purpose": "Pencarian web real-time untuk regulasi, pedoman, dan informasi kesehatan publik",
-            },
-            "calculator": {
-                "path": "internal://calc/eval",
-                "method": "INTERNAL",
-                "purpose": "Evaluasi perhitungan matematika atau estimasi biaya/tarif",
-            },
-        }
-
         # 2. Ambil semua tools yang tercatat di agent
         tools_list = agent.tools or []
         tools_res = await db.execute(select(ToolModel).where(ToolModel.name.in_(tools_list)))
         db_tools_map = {t.name: t for t in tools_res.scalars().all()}
 
+        # Utilitas bawaan umum
+        builtin_general_defs: Dict[str, Dict[str, Any]] = {
+            "search_web": {
+                "path": "https://duckduckgo.com",
+                "method": "GET",
+                "purpose": "Pencarian web real-time untuk informasi publik",
+                "source_type": "builtin"
+            },
+            "calculator": {
+                "path": "internal://calc/eval",
+                "method": "INTERNAL",
+                "purpose": "Evaluasi perhitungan matematika dan kalkulasi angka",
+                "source_type": "builtin"
+            },
+        }
+
         tools_required_list = []
         for tname in tools_list:
             t_obj = db_tools_map.get(tname)
-            t_def = tool_endpoint_defs.get(tname, {})
-
-            # Resolusi endpoint dan method
-            path = t_def.get("path")
-            method = t_def.get("method", "POST")
-            purpose = (t_obj.description if t_obj and t_obj.description else None) or t_def.get("purpose") or f"Layanan tool {tname}"
-
-            # Resolusi sumber MCP Server
+            
+            # Resolusi sumber MCP Server jika terikat
             mcp_srv = None
             if t_obj and t_obj.mcp_server_id:
                 mcp_srv = mcp_by_id.get(t_obj.mcp_server_id)
 
-            # Cek base URL spesifik tool jika ada di input_schema
-            tool_api_base = None
-            if t_obj and t_obj.input_schema:
-                tool_api_base = (
-                    t_obj.input_schema.get("x-api-config", {}).get("base_url")
-                    or t_obj.input_schema.get("x-openapi", {}).get("server_url")
-                    or t_obj.input_schema.get("base_url")
-                )
-            if not tool_api_base and mcp_srv and mcp_srv.url and not mcp_srv.url.endswith("/local-server"):
-                tool_api_base = mcp_srv.url.rstrip("/")
-            if not tool_api_base:
-                tool_api_base = active_api_base
-
             endpoint = None
+            method = "POST"
             conn_status = "unconfigured"
-            source_type = t_obj.source_type if t_obj else "web_api"
+            source_type = t_obj.source_type if t_obj else "custom"
+            purpose = (t_obj.description if t_obj and t_obj.description else None) or f"Layanan tool {tname}"
+            mcp_name = mcp_srv.name if mcp_srv else None
 
-            if path:
-                if path.startswith("http://") or path.startswith("https://") or path.startswith("internal://"):
-                    endpoint = path
+            # Prioritas 1: Tool deklaratif dari Tool Factory (implementation.type == 'http')
+            if t_obj and t_obj.implementation and isinstance(t_obj.implementation, dict):
+                impl = t_obj.implementation
+                endpoint = impl.get("url")
+                method = impl.get("method", "GET")
+                source_type = impl.get("type", "http")
+                conn_status = "connected" if endpoint else "unconfigured"
+            
+            # Prioritas 2: Built-in general utility
+            elif tname in builtin_general_defs:
+                b_def = builtin_general_defs[tname]
+                endpoint = b_def.get("path")
+                method = b_def.get("method", "GET")
+                source_type = b_def.get("source_type", "builtin")
+                purpose = b_def.get("purpose", purpose)
+                conn_status = "connected"
+            
+            # Prioritas 3: MCP Server
+            elif mcp_srv and mcp_srv.url:
+                endpoint = f"{mcp_srv.url.rstrip('/')}/tools/{tname}"
+                method = "POST"
+                source_type = "mcp"
+                conn_status = "connected"
+            
+            # Prioritas 4: Fallback OpenAPI / config in schema
+            elif t_obj and t_obj.input_schema:
+                schema_cfg = t_obj.input_schema.get("x-api-config", {}) or t_obj.input_schema.get("x-openapi", {})
+                b_url = schema_cfg.get("base_url") or schema_cfg.get("server_url")
+                if b_url:
+                    endpoint = f"{b_url.rstrip('/')}/{tname}"
                     conn_status = "connected"
-                    if path.startswith("internal://"):
-                        source_type = "builtin"
-                elif path.startswith("/"):
-                    if tool_api_base:
-                        endpoint = f"{tool_api_base}{path}"
-                        conn_status = "connected"
-                    else:
-                        endpoint = None
-                        conn_status = "unconfigured"
-                    source_type = "mcp" if (t_obj and t_obj.source_type == "mcp") else "web_api"
-            else:
-                if tool_api_base:
-                    endpoint = f"{tool_api_base}/tools/{tname}"
-                    conn_status = "connected"
-                source_type = t_obj.source_type if t_obj else "custom"
 
             # Ambil input schema
             schema = (t_obj.input_schema if t_obj and t_obj.input_schema else None) or DEFAULT_BUILTIN_SCHEMAS.get(tname, {"type": "object", "properties": {}})
-
-            mcp_name = mcp_srv.name if mcp_srv else ("JKN Care Services MCP" if ("bpjs" in tname or "hospital" in tname or "doctor" in tname or "referral" in tname) else None)
 
             tools_required_list.append({
                 "tool_ref": tname,

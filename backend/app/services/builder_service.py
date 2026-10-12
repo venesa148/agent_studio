@@ -1,5 +1,6 @@
 import json
 import re
+import uuid
 from typing import Any, List, Optional
 
 from openai import AsyncOpenAI
@@ -7,6 +8,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.builder_engine import (
+    Ledger,
+    coverage_check,
+    next_questions,
+    validate_spec,
+    execute_http,
+    check_url,
+    Blocked
+)
 from app.models.agent import AgentSpecModel
 from app.models.tool import ToolModel
 from app.schemas.agent import AgentSpec, AgentSpecResponse, BuilderChatResponse
@@ -29,7 +39,7 @@ class BuilderService:
             candidate = named_match.group(1).strip()
             if candidate and len(candidate.split()) <= 6:
                 name = candidate.title()
-                for acr in ["BPJS", "CS", "AI", "API", "IT", "RS", "IGD", "FKTP", "JKN"]:
+                for acr in ["AI", "API", "IT", "CS", "HR", "CRM", "ERP", "SOP", "URL", "JSON", "REST", "SQL", "BPJS"]:
                     name = re.sub(rf"\b{acr.capitalize()}\b", acr, name)
                 return name
 
@@ -56,7 +66,7 @@ class BuilderService:
         if not cleaned:
             return "Custom AI Assistant"
         name = cleaned[:60].title()
-        for acr in ["BPJS", "CS", "AI", "API", "IT", "RS", "IGD", "FKTP", "JKN"]:
+        for acr in ["AI", "API", "IT", "CS", "HR", "CRM", "ERP", "SOP", "URL", "JSON", "REST", "SQL", "BPJS"]:
             name = re.sub(rf"\b{acr.capitalize()}\b", acr, name)
         return name
 
@@ -164,45 +174,64 @@ class BuilderService:
             current_spec_json = current_spec.model_dump_json() if current_spec else "Belum ada spesifikasi awal."
             
             system_msg = (
-                "Anda adalah 'Agent Builder', asisten konsultan dan arsitek AI kelas dunia yang bertugas merancang AI Agent baru bersama pengguna secara interaktif (Conversational Co-pilot).\n\n"
-                "PANDUAN INTERAKSI KONSULTATIF (MULTI-TURN):\n"
-                "1. EKSPLORASI & TANYA KLARIFIKASI (Jika Permintaan Singkat/Umum):\n"
-                "   - Jika pengguna baru menyebut ide umum (contoh: 'mau bikin agent makan', 'buat agent klinik', 'bikin bot travel'), JANGAN langsung mengunci dan menyelesaikan spesifikasi.\n"
-                "   - Sambut dengan ramah di 'message', lalu ajukan 1–2 pertanyaan pemantik yang terarah (contoh: apa tujuan utamanya, fitur apa saja yang diharapkan, target penggunanya siapa).\n"
-                "   - Rancang draf awal nama & fungsi di objek 'spec' agar pengguna melihat gambaran visualnya, namun jelaskan di 'message' bahwa ini draf awal dan tanyakan konfirmasi mereka.\n\n"
-                "2. GALI BATASAN & PREFERENSI (Guardrails):\n"
-                "   - Tanyakan apakah ada aturan khusus (misal: gaya bahasa santai/formal, batasan privasi, pantangan medis, pantangan topik).\n\n"
-                "3. PILIH TOOLS DARI DATABASE KATALOG (100% DINAMIS & CERDAS):\n"
-                f"   - Tool yang aktif di database saat ini:\n{tools_info}\n"
-                "   - Panduan kecocokan kebutuhan:\n"
-                "     * Butuh info web/berita/referensi riil online -> 'search_web'\n"
-                "     * Butuh hitungan matematika presisi -> 'calculator'\n"
-                "     * Butuh request REST API eksternal -> 'api_fetch'\n"
-                "     * Butuh waktu/tanggal/jam server saat ini -> 'system_time'\n"
-                "     * Butuh info spek sistem/runtime OS -> 'system_diagnostics'\n"
-                "     * Butuh konversi nilai kurs uang asing ke IDR -> 'currency_converter'\n"
-                "     * Butuh data rumah sakit / rujukan kesehatan -> 'search_hospital', 'get_referral_status'\n"
-                "   - Pilih HANYA nama tool yang benar-benar ada di daftar di atas. Jika tidak ada yang relevan, kosongkan []. DILARANG MENGARANG NAMA TOOL.\n"
-                "   - Dalam 'instructions' (system prompt agent), sertakan instruksi jelas bagaimana agen harus memanfaatkan tool-tool tersebut secara jujur tanpa halusinasi.\n\n"
-                "4. DRAF PREVIEW & REVISI BERKELANJUTAN:\n"
-                "   - Setiap kali pengguna memberikan detail baru atau meminta revisi (contoh: 'tambahkan estimasi waktu', 'ganti namanya'), perbarui isi 'spec'.\n"
-                "   - Di 'message', jelaskan poin-poin yang baru Anda perbarui dan tanyakan apakah ada hal lain yang ingin disesuaikan.\n\n"
-                "5. KAPAN HARUS COMMIT KE DATABASE ('should_commit'):\n"
-                "   - Set 'should_commit': true HANYA jika pengguna secara eksplisit berkata 'oke simpan', 'sudah pas', 'buatkan sekarang', 'apply', atau 'save'.\n"
-                "   - Jika pengguna masih berdiskusi, bertanya, atau memberikan detail, selalu set 'should_commit': false.\n\n"
-                "FORMAT BALASAN MUTLAK (Harus berupa JSON valid di dalam blok ```json ... ```):\n"
+                "Anda adalah 'Builder Agent & Tool Architect' di Agent Studio, mengacu pada standar resmi SKILL.md (agent-builder-cek-12-poin).\n"
+                "Tugas Anda: Mewawancarai pengguna non-teknis lewat percakapan interaktif, mengekstrak 12 Poin Kelengkapan secara DINAMIS (untuk industri/topik apa pun: toko online, helpdesk, HRD, klinik, akuntansi, dll), dan merancang spesifikasi agent serta draf tool.\n\n"
+                "ATURAN KERAS (STANDAR SKILL.MD):\n"
+                "1. PLATFORM UNIVERSAL (DINAMIS):\n"
+                "   - Anda BUKAN bot khusus kesehatan/BPJS. Anda melayani pembuatan agent untuk domain apa pun yang diminta pengguna.\n"
+                "   - Dilarang berasumsi atau memaksakan topik kesehatan/BPJS jika pengguna tidak memintanya.\n\n"
+                "2. TEKNIK WAWANCARA (ECHO-BACK & MAKSIMAL 2 PERTANYAAN):\n"
+                "   - Di awal respon 'message', lakukan echo-back singkat: rangkum poin yang sudah dipahami dari jawaban pengguna.\n"
+                "   - Ajukan MAKSIMAL 1–2 pertanyaan per giliran untuk menggali poin yang masih kosong.\n"
+                "   - Urutan prioritas pertanyaan (utamakan yang paling menentukan): C4 (Tindakan boleh/mutasi data) -> C3 (Sumber data/API) -> C5 (Larangan/batas topik) -> C1 (Tujuan utama) -> C6 (Jika data kosong/gagal) -> C12 (Dokumen acuan) -> C8 (Batas pemakaian) -> C9 (Data sensitif) -> C7 (Gaya jawaban) -> C10 (Serah ke manusia) -> C2 (Target pengguna) -> C11 (Contoh percakapan benar).\n"
+                "   - Jika pengguna berkata 'langsung bangun saja' atau 'terserah', tolak dengan sopan dan jelaskan bahwa poin krusial (seperti izin aksi mutasi data atau sumber API) tetap membutuhkan konfirmasinya.\n\n"
+                "3. PERANCANGAN TOOL (KATALOG VS TOOL FACTORY):\n"
+                "   A. KATALOG TERSEDIA:\n"
+                f"      Tool aktif saat ini:\n{tools_info}\n"
+                "      Jika kebutuhan pengguna cocok dengan tool di atas, masukkan namanya ke 'spec.tools'.\n"
+                "   B. TOOL FACTORY (JIKA PENGGUNA MEMBERIKAN API / ENDPOINT / SISTEM BARU):\n"
+                "      Jika pengguna menyebutkan URL API, endpoint web (contoh: https://.../api/..., method GET/POST), rancang tool baru di array 'new_tools':\n"
+                "      - name: nama tool (snake_case, contoh: check_order_status, book_slot)\n"
+                "      - description: penjelasan kapan tool ini dipanggil oleh model AI (minimal 40 karakter)\n"
+                "      - input_schema: format JSON Schema lengkap (properties, type, required)\n"
+                "      - implementation: konfigurasi privat untuk Runner/Executor:\n"
+                "        * type: \"http\"\n"
+                "        * url: URL endpoint lengkap\n"
+                "        * method: \"GET\" | \"POST\" | \"PUT\" | \"DELETE\"\n"
+                "      - effect: \"read\" (hanya membaca data) atau \"write\" (mengubah/menambah data)\n"
+                "      - status: \"draft\"\n"
+                "      - source_ids: [\"L-001\"]\n\n"
+                "4. ATURAN COMMIT ('should_commit'):\n"
+                "   - Set 'should_commit': true HANYA jika pengguna menyatakan eksplisit setuju menyimpan ('simpan', 'terapkan', 'oke bangun sekarang', 'apply').\n"
+                "   - Selama masih dalam proses tanya jawab atau klarifikasi, selalu set 'should_commit': false.\n\n"
+                "FORMAT BALASAN (Wajib JSON valid di dalam blok ```json ... ```):\n"
                 "{\n"
-                '  "message": "Kalimat percakapan Anda dalam Bahasa Indonesia yang ramah, profesional, dan interaktif.",\n'
+                '  "message": "Kalimat percakapan ramah (echo-back rangkuman singkat + maks 2 pertanyaan terarah berikutnya)",\n'
                 '  "spec_updated": true,\n'
                 '  "should_commit": false,\n'
                 '  "spec": {\n'
                 '    "name": "Nama Agent",\n'
-                '    "description": "Deskripsi singkat fungsi agen",\n'
-                '    "instructions": "System prompt lengkap (Peran, SOP, Gaya Bahasa, Batasan Keamanan, dan Aturan Penggunaan Tool)",\n'
-                '    "tools": ["nama_tool_1"]\n'
+                '    "description": "Tugas utama agent (C1)",\n'
+                '    "instructions": "System prompt lengkap (Peran, SOP, Gaya Bahasa C7, Fallback C6, Batasan C5)",\n'
+                '    "tools": ["nama_tool"]\n'
+                '  },\n'
+                '  "new_tools": [],\n'
+                '  "coverage": {\n'
+                '    "C1": "terisi",\n'
+                '    "C2": "kosong",\n'
+                '    "C3": "kosong",\n'
+                '    "C4": "kosong",\n'
+                '    "C5": "kosong",\n'
+                '    "C6": "kosong",\n'
+                '    "C7": "terisi",\n'
+                '    "C8": "kosong",\n'
+                '    "C9": "kosong",\n'
+                '    "C10": "kosong",\n'
+                '    "C11": "kosong",\n'
+                '    "C12": "kosong"\n'
                 '  }\n'
                 "}\n\n"
-                f"Spesifikasi saat ini (jika ada): {current_spec_json}\n"
+                f"Spesifikasi saat ini: {current_spec_json}\n"
             )
             
             messages = [{"role": "system", "content": system_msg}]
@@ -245,13 +274,74 @@ class BuilderService:
                     spec_updated = parsed.get("spec_updated", False)
                     should_commit = parsed.get("should_commit", False)
                     
+                    # Tool Factory: Simpan draf tool baru yang dirancang oleh LLM
+                    new_tools_raw = parsed.get("new_tools", [])
+                    if new_tools_raw and isinstance(new_tools_raw, list):
+                        allowed_hosts = ["*.trycloudflare.com", "trycloudflare.com", "localhost", "127.0.0.1", "api.github.com", "*.supabase.co", "*"]
+                        for nt in new_tools_raw:
+                            if not isinstance(nt, dict):
+                                continue
+                            nt_name = (nt.get("name") or "").strip().lower()
+                            if not nt_name:
+                                continue
+                            nt_desc = nt.get("description", f"Tool {nt_name}")
+                            nt_schema = nt.get("input_schema") or {"type": "object", "properties": {}}
+                            nt_impl = nt.get("implementation", {})
+                            nt_effect = nt.get("effect", "read")
+                            nt_status = "published" if should_commit else nt.get("status", "draft")
+                            
+                            t_check = await db.execute(select(ToolModel).where(ToolModel.name == nt_name))
+                            existing_t = t_check.scalar_one_or_none()
+                            if existing_t:
+                                existing_t.description = nt_desc
+                                existing_t.input_schema = nt_schema
+                                existing_t.implementation = nt_impl
+                                existing_t.effect = nt_effect
+                                existing_t.status = nt_status
+                                existing_t.source_type = "http"
+                            else:
+                                new_t = ToolModel(
+                                    id=str(uuid.uuid4()),
+                                    name=nt_name,
+                                    description=nt_desc,
+                                    input_schema=nt_schema,
+                                    implementation=nt_impl,
+                                    effect=nt_effect,
+                                    status=nt_status,
+                                    source_type="http",
+                                    is_active=True
+                                )
+                                db.add(new_t)
+                            valid_db_tools[nt_name] = nt_desc
+                        await db.flush()
+                    
+                    # Kalkulasi Coverage Checklist (12 Poin Wajib SKILL.md)
+                    raw_cov = parsed.get("coverage", {}) if isinstance(parsed.get("coverage"), dict) else {}
+                    cov_items = {}
+                    satisfied_count = 0
+                    for i in range(1, 13):
+                        key = f"C{i}"
+                        status_val = raw_cov.get(key, "kosong")
+                        cov_items[key] = status_val
+                        if status_val in ("terisi", "tidak_berlaku", "diserahkan"):
+                            satisfied_count += 1
+
+                    cov_percent = round((satisfied_count / 12) * 100)
+                    coverage_data = {
+                        "satisfied": satisfied_count,
+                        "total": 12,
+                        "percent": cov_percent,
+                        "can_build": satisfied_count >= 12,
+                        "items": cov_items
+                    }
+
                     if spec_updated and "spec" in parsed:
                         spec_data = parsed["spec"]
                         name = spec_data.get("name", "Custom Agent")
                         description = spec_data.get("description", "")
                         instructions = spec_data.get("instructions", "")
                         tools = [t for t in spec_data.get("tools", []) if t in valid_db_tools]
-                        
+
                         mcp_servers: List[str] = []
                         if tools:
                             t_query = await db.execute(
@@ -267,7 +357,7 @@ class BuilderService:
                             if current_spec and current_spec.id:
                                 result = await db.execute(select(AgentSpecModel).where(AgentSpecModel.id == current_spec.id))
                                 db_agent = result.scalar_one_or_none()
-                            
+
                             if db_agent:
                                 db_agent.name = name
                                 db_agent.description = description
@@ -280,7 +370,7 @@ class BuilderService:
                                     model=(settings.LLM_MODEL or "z-ai/glm-5.3"), tools=tools, mcp_servers=mcp_servers, harness="default-safe-v1", status="active"
                                 )
                                 db.add(db_agent)
-                                
+
                             await db.commit()
                             await db.refresh(db_agent)
                             try:
@@ -289,7 +379,7 @@ class BuilderService:
                             except Exception as e_yaml:
                                 print(f"Warning auto-export yaml: {e_yaml}")
                             spec_response = AgentSpec.model_validate(db_agent)
-                            return BuilderChatResponse(id=db_agent.id, message=message, spec=spec_response, is_draft=False)
+                            return BuilderChatResponse(id=db_agent.id, message=message, spec=spec_response, is_draft=False, new_tools=new_tools_raw, coverage=coverage_data)
                         else:
                             # In-memory Draft Spec (Belum di-commit ke DB agar user bisa review & revisi)
                             draft_spec = AgentSpec(
@@ -303,9 +393,9 @@ class BuilderService:
                                 harness="default-safe-v1",
                                 status="draft"
                             )
-                            return BuilderChatResponse(id=draft_spec.id, message=message, spec=draft_spec, is_draft=True)
+                            return BuilderChatResponse(id=draft_spec.id, message=message, spec=draft_spec, is_draft=True, new_tools=new_tools_raw, coverage=coverage_data)
                     else:
-                        return BuilderChatResponse(message=message, is_draft=True)
+                        return BuilderChatResponse(message=message, is_draft=True, new_tools=new_tools_raw, coverage=coverage_data)
                         
             except Exception as e:
                 print(f"LLM Builder Error: {e}")

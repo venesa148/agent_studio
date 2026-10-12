@@ -59,6 +59,14 @@ async def init_db():
                 await conn.execute(text("ALTER TABLE tools ADD COLUMN input_schema JSON NULL"))
             if "is_active" not in cols:
                 await conn.execute(text("ALTER TABLE tools ADD COLUMN is_active BOOLEAN DEFAULT TRUE"))
+            if "status" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN status VARCHAR(50) DEFAULT 'published'"))
+            if "effect" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN effect VARCHAR(50) DEFAULT 'read'"))
+            if "implementation" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN implementation JSON NULL"))
+            if "source_ids" not in cols:
+                await conn.execute(text("ALTER TABLE tools ADD COLUMN source_ids JSON NULL"))
             if "auth_custody" not in cols:
                 await conn.execute(text("ALTER TABLE tools ADD COLUMN auth_custody VARCHAR(100) DEFAULT 'none'"))
             if "health_status" not in cols:
@@ -78,48 +86,22 @@ async def init_db():
             if "details" not in cols:
                 await conn.execute(text("ALTER TABLE evaluations ADD COLUMN details JSON NULL"))
 
-            # Pastikan MCP server live JKN Care terdaftar di database
+            # Seeding tools utilitas umum yang netral (bukan hardcoded BPJS)
             import uuid
-            from datetime import datetime, timezone
-
-            mcp_id = None
-            if "mcp_servers" in tables:
-                live_url = (getattr(settings, "EXTERNAL_MOCK_API_URL", "https://golden-funny-scientific-undefined.trycloudflare.com") or "").rstrip("/") + "/"
-                mcp_check = await conn.execute(text("SELECT id FROM mcp_servers WHERE url LIKE '%trycloudflare.com%' OR (name ILIKE '%jkn%' AND url NOT LIKE '%local-server%')"))
-                mcp_id = mcp_check.scalar()
-                if not mcp_id:
-                    mcp_id = "3144f9ba-abc1-41de-a8b6-ec0c61369c72"
-                    await conn.execute(
-                        text("INSERT INTO mcp_servers (id, name, url, status, created_at, updated_at) "
-                             "VALUES (:id, :name, :url, 'connected', :created_at, :updated_at)"),
-                        {"id": mcp_id, "name": "JKN Care Services MCP", "url": live_url, "created_at": datetime.utcnow(), "updated_at": datetime.utcnow()}
-                    )
+            from datetime import datetime
 
             default_builtin_tools = [
-                ("search_hospital", "Cari data rumah sakit rekanan BPJS dan ketersediaan layanan faskes", "builtin"),
-                ("get_referral_status", "Cek status dan validitas nomor rujukan faskes BPJS", "builtin"),
-                ("find_specialist", "Cari dokter spesialis berdasarkan poliklinik dan kota", "builtin"),
-                ("check_bpjs", "Cek status kepesertaan BPJS dan eligibility layanan", "builtin"),
-                ("search_web", "Pencarian web secara real-time di internet melalui DuckDuckGo", "builtin"),
-                ("hospital_finder", "Cari data rumah sakit terdekat dan status faskes BPJS", "builtin"),
                 ("calculator", "Evaluasi ekspresi matematika dan kalkulasi angka secara presisi", "builtin"),
-                ("api_fetch", "Panggil REST API publik melalui HTTP GET atau POST", "builtin"),
-                ("classify_complaint", "Triage keluhan klinis (EMERGENCY, NEED_FURTHER_CARE, INFORMATION_ONLY) dan mapping poli kandidat", "mcp"),
-                ("get_participant_status", "Cek status kepesertaan JKN/BPJS dan kelayakan administrasi peserta", "mcp"),
-                ("search_hospitals", "Cari direktori rumah sakit rekanan BPJS berdasarkan kota/layanan via Web API", "mcp"),
-                ("search_doctors", "Cari dokter spesialis dan ketersediaan jadwal praktik di rumah sakit via Web API", "mcp"),
-                ("create_appointment", "Booking janji temu/antrean faskes BPJS setelah konfirmasi eksplisit dari user via Web API", "mcp"),
-                ("get_appointment", "Cek status booking janji temu dan nomor antrean pasien via Web API", "mcp"),
+                ("search_web", "Pencarian web secara real-time di internet melalui DuckDuckGo", "builtin"),
             ]
             for t_name, t_desc, t_source in default_builtin_tools:
                 check_t = await conn.execute(text("SELECT id FROM tools WHERE name = :name"), {"name": t_name})
                 if not check_t.scalar():
                     t_id = str(uuid.uuid4())
-                    mcp_srv_val = mcp_id if t_source == "mcp" else None
                     await conn.execute(
-                        text("INSERT INTO tools (id, name, description, source_type, mcp_server_id, is_active, auth_custody, health_status, used_by, created_at) "
-                             "VALUES (:id, :name, :description, :source_type, :mcp_server_id, TRUE, 'none', 'healthy', 'All agents', :created_at)"),
-                        {"id": t_id, "name": t_name, "description": t_desc, "source_type": t_source, "mcp_server_id": mcp_srv_val, "created_at": datetime.utcnow()}
+                        text("INSERT INTO tools (id, name, description, source_type, is_active, auth_custody, health_status, used_by, status, effect, created_at) "
+                             "VALUES (:id, :name, :description, :source_type, TRUE, 'none', 'healthy', 'All agents', 'published', 'read', :created_at)"),
+                        {"id": t_id, "name": t_name, "description": t_desc, "source_type": t_source, "created_at": datetime.utcnow()}
                     )
 
 

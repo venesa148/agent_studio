@@ -15,6 +15,10 @@ class ToolModel(Base):
     mcp_server_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("mcp_servers.id"), nullable=True)
     input_schema: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(50), default="published") # draft, tested, approved, published, retired
+    effect: Mapped[str] = mapped_column(String(50), default="read") # read, write, external
+    implementation: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True) # private execution details (http/mcp)
+    source_ids: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True) # provenance ledger IDs
     auth_custody: Mapped[Optional[str]] = mapped_column(String(100), default="none")
     health_status: Mapped[str] = mapped_column(String(50), default="healthy")
     used_by: Mapped[Optional[str]] = mapped_column(String(255), default="All agents")

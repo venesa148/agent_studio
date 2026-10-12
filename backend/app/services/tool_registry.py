@@ -29,7 +29,11 @@ class ToolRegistryService:
 
         if not tool_entry or not tool_entry.is_active:
             raise ValueError(f"Tool '{tool_name}' tidak terdaftar atau tidak aktif.")
-        if tool_entry.source_type == "mcp" and tool_entry.mcp_server_id:
+
+        # 1. Prioritas Utama: Eksekusi deklaratif dinamis jika memiliki konfigurasi implementation (Bagan A / Tool Factory)
+        if tool_entry.implementation and tool_entry.implementation.get("type") == "http":
+            output = await ToolRegistryService._execute_declarative_http(tool_entry, params)
+        elif tool_entry.source_type == "mcp" and tool_entry.mcp_server_id:
             # Ambil detail MCP Server
             mcp_result = await db.execute(select(MCPServerModel).where(MCPServerModel.id == tool_entry.mcp_server_id))
             mcp_server = mcp_result.scalar_one_or_none()
@@ -39,7 +43,7 @@ class ToolRegistryService:
             try:
                 output = await MCPClientService.call_tool(server_url, tool_name, params)
             except Exception:
-                # Jika server remote merupakan REST API (bukan native JSON-RPC) atau gagal via SSE, fallback ke executor internal/REST
+                # Fallback ke deklaratif / builtin jika gagal
                 output = await ToolRegistryService._execute_builtin_tool(tool_name, params, db=db, tool_entry=tool_entry)
         elif tool_entry and tool_entry.source_type == "openapi":
             output = await ToolRegistryService._execute_openapi_tool(tool_entry, params)
@@ -56,6 +60,50 @@ class ToolRegistryService:
             "result": output,
             "duration_ms": duration_ms
         }
+
+    @staticmethod
+    async def _execute_declarative_http(tool_entry: ToolModel, params: Dict[str, Any]) -> Any:
+        """
+        Eksekusi tool HTTP deklaratif murni dari spesifikasi implementation di database.
+        Mendukung GET, POST, PUT, DELETE dengan substitusi parameter dan proteksi timeout.
+        """
+        impl = tool_entry.implementation or {}
+        method = (impl.get("method") or "GET").upper()
+        url = impl.get("url") or ""
+
+        # Substitusi placeholder URL seperti {id} atau {city}
+        used_keys = set()
+        for k, v in params.items():
+            placeholder = f"{{{k}}}"
+            if placeholder in url:
+                url = url.replace(placeholder, str(v))
+                used_keys.add(k)
+
+        headers = dict(impl.get("headers", {}))
+        auth_conf = impl.get("auth") or {}
+        if auth_conf.get("in") == "header" and auth_conf.get("name") and auth_conf.get("secret"):
+            headers[auth_conf["name"]] = auth_conf["secret"]
+
+        timeout_sec = float(impl.get("timeout_ms", 10000)) / 1000.0
+
+        async with httpx.AsyncClient(timeout=timeout_sec, follow_redirects=True) as client:
+            if method == "GET":
+                query_params = {k: v for k, v in params.items() if k not in used_keys}
+                resp = await client.get(url, params=query_params, headers=headers)
+            else:
+                resp = await client.request(method, url, json=params, headers=headers)
+
+            if resp.status_code >= 400:
+                return {"error": f"http_{resp.status_code}", "detail": resp.text[:300]}
+            try:
+                data = resp.json()
+            except Exception:
+                data = resp.text
+
+            select_fields = impl.get("response", {}).get("select")
+            if select_fields and isinstance(data, dict):
+                data = {k: data.get(k) for k in select_fields if k in data}
+            return data
 
     @staticmethod
     async def _execute_builtin_tool(
@@ -97,42 +145,19 @@ class ToolRegistryService:
                             api_base = mcp_srv.url
 
             if not api_base:
-                # Prioritaskan MCP Server yang secara spesifik melayani JKN / BPJS atau cloudflare tunnel
-                jkn_mcp_res = await db.execute(
+                ext_mcp_res = await db.execute(
                     select(MCPServerModel).where(
-                        or_(
-                            MCPServerModel.name.ilike("%jkn%"),
-                            MCPServerModel.name.ilike("%bpjs%"),
-                            MCPServerModel.url.ilike("%trycloudflare.com%"),
-                            MCPServerModel.url.ilike("%mock-bpjs%")
-                        ),
                         MCPServerModel.status == "connected",
                         MCPServerModel.url.notlike("%/local-server%"),
                         MCPServerModel.url.notlike("%localhost:8080%")
                     ).order_by(MCPServerModel.updated_at.desc())
-                )
-                jkn_srv = jkn_mcp_res.scalars().first()
-                if jkn_srv and jkn_srv.url:
-                    api_base = jkn_srv.url
-
-            if not api_base:
-                ext_mcp_res = await db.execute(
-                    select(MCPServerModel).where(
-                        MCPServerModel.url.notlike("%/local-server%"),
-                        MCPServerModel.url.notlike("%notion%"),
-                        MCPServerModel.url.notlike("%github%"),
-                        MCPServerModel.url.notlike("%localhost:8080%"),
-                        MCPServerModel.name.notlike("%github%"),
-                        MCPServerModel.name.notlike("%notion%"),
-                        MCPServerModel.status == "connected"
-                    )
                 )
                 ext_srv = ext_mcp_res.scalars().first()
                 if ext_srv and ext_srv.url:
                     api_base = ext_srv.url
 
         if not api_base:
-            api_base = getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "https://golden-funny-scientific-undefined.trycloudflare.com")
+            api_base = (getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "")).rstrip("/")
 
         api_base = str(api_base).rstrip("/")
 
@@ -145,8 +170,8 @@ class ToolRegistryService:
                 return {
                     "referral_no": ref_id,
                     "status": "NOT_FOUND",
-                    "_source": "Database Faskes BPJS",
-                    "message": f"Surat rujukan dengan nomor {ref_id} tidak ditemukan dalam basis data faskes BPJS Kesehatan."
+                    "_source": "Database Layanan Rujukan",
+                    "message": f"Surat rujukan dengan nomor {ref_id} tidak ditemukan dalam basis data."
                 }
             
             target_url = f"{api_base}/api/v1/mock-bpjs/referral-status"
@@ -340,8 +365,8 @@ class ToolRegistryService:
                     "error_type": "SERVICE_UNAVAILABLE",
                     "_endpoint": target_url,
                     "_source": "Live Web API Teman (Offline)",
-                    "nik_atau_kartu": bpjs_id,
-                    "message": f"Server sistem verifikasi kepesertaan BPJS sedang offline atau tidak dapat dijangkau ({type(e).__name__})."
+                    "participant_id": bpjs_id,
+                    "message": f"Server sistem verifikasi sedang offline atau tidak dapat dijangkau ({type(e).__name__})."
                 }
 
         # 5. search_web (Real Live Web Search)
@@ -378,7 +403,7 @@ class ToolRegistryService:
                 print(f"[Live Web Search Warning]: {e_search}")
 
             # 2. Fallback ke remote API jika dikonfigurasi
-            target_url = f"{api_base}/api/v1/mock-bpjs/search-web" if api_base and "trycloudflare" not in api_base else ""
+            target_url = f"{api_base}/api/v1/search-web" if api_base and "trycloudflare" not in api_base else ""
             if target_url:
                 try:
                     async with httpx.AsyncClient(timeout=6.0) as client:
@@ -578,7 +603,7 @@ class ToolRegistryService:
                 "doctor_name": doctor_name,
                 "booking_date": appt_date,
                 "session_time": time_slot,
-                "bpjs_number": str(params.get("bpjs_number") or params.get("number") or "1234567890123456")
+                "participant_id": str(params.get("participant_id") or params.get("bpjs_number") or params.get("number") or "")
             }
 
             try:

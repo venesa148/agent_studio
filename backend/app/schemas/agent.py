@@ -66,6 +66,8 @@ class BuilderChatResponse(BaseModel):
     message: str
     spec: Optional[AgentSpec] = None
     is_draft: bool = False
+    new_tools: Optional[List[Dict[str, Any]]] = None
+    coverage: Optional[Dict[str, Any]] = None
 
 class AgentTestRequest(BaseModel):
     agent_id: str

@@ -11,7 +11,7 @@ from app.models.trace import TraceLogModel
 class OpenAIAgentService:
 
     @staticmethod
-    async def process_chat(db: AsyncSession, prompt: str, agent_name: str = "BPJS Customer Service Agent") -> Dict[str, Any]:
+    async def process_chat(db: AsyncSession, prompt: str, agent_name: str = "AI Assistant") -> Dict[str, Any]:
         """
         Proses percakapan agent secara synchronous JSON response.
         """
@@ -31,15 +31,12 @@ class OpenAIAgentService:
             }
 
         # 2. Escalation Test Scenario
-        if "rj-9999" in prompt_lower:
+        if "escalate_test" in prompt_lower or "rj-9999" in prompt_lower:
             start_t = time.time()
-            tool_res = await ToolRegistryService.execute_tool(db, "get_referral_status", {"referral_id": "RJ-9999"})
-            await OpenAIAgentService._save_trace_step(db, run_id, 1, "tool_call", "Panggilan Tool: get_referral_status()", tool_res["duration_ms"], tool_res["params"], "ok")
             return {
                 "id": str(uuid.uuid4()),
                 "sender": "agent",
-                "text": "Nomor rujukan RJ-9999 tidak ditemukan dalam basis data faskes. Sesuai prosedur, laporan ini telah dieskalasi ke tim helpdesk BPJS untuk penanganan lebih lanjut.",
-                "toolCall": tool_res,
+                "text": "Data tidak ditemukan dalam sistem. Sesuai prosedur, laporan ini telah dieskalasi ke tim helpdesk untuk penanganan lebih lanjut.",
                 "status": "escalated",
                 "run_id": run_id,
                 "time": "Sekarang"
@@ -68,23 +65,13 @@ class OpenAIAgentService:
             except Exception as e:
                 pass
 
-        # Fallback default response dengan tool call faskes jika OpenAI Key belum diisi
-        start_t = time.time()
-        tool_res = await ToolRegistryService.execute_tool(db, "search_hospital", {"city": "Jakarta", "bpjs": True})
-        await OpenAIAgentService._save_trace_step(db, run_id, 1, "tool_call", "Panggilan Tool: search_hospital()", tool_res["duration_ms"], tool_res["params"], "ok")
-
-        response_text = (
-            "Berikut adalah rumah sakit rekanan BPJS di wilayah yang Anda cari:\n"
-            "1. RS Cipto Mangunkusumo (Tipe A) - Fasilitas lengkap & IGD 24 Jam\n"
-            "2. RSUD Tarakan (Tipe B) - Menerima rujukan poli jantung\n"
-            "3. RS Fatmawati (Tipe A) - Rawat inap & bedah sentral."
-        )
+        # Fallback default response jika OpenAI Key belum diisi
+        response_text = f"Halo, saya {agent_name}. Permintaan Anda: '{prompt}' berhasil diterima dan sedang diproses."
 
         return {
             "id": str(uuid.uuid4()),
             "sender": "agent",
             "text": response_text,
-            "toolCall": tool_res,
             "status": "ok",
             "run_id": run_id,
             "time": "Sekarang"

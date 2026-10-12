@@ -33,7 +33,7 @@ export default function EvaluationPage() {
   // Form states untuk Add Test Case
   const [inputScenario, setInputScenario] = useState("");
   const [expectedTool, setExpectedTool] = useState("");
-  const [agentTarget, setAgentTarget] = useState("BPJS Customer Service Agent");
+  const [agentTarget, setAgentTarget] = useState("Custom Agent");
 
   const [testCases, setTestCases] = useState<any[]>([]);
   const [dbAgents, setDbAgents] = useState<{ id: string; name: string }[]>([]);
@@ -237,10 +237,10 @@ export default function EvaluationPage() {
                 type="button"
                 onClick={handleSeedDefaults}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
-                title="Muat 5 Test Case Standar BPJS"
+                title="Muat 5 Test Case Standar Evaluasi"
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>Muat Template BPJS</span>
+                <span>Muat Template Standar</span>
               </button>
 
               <button
@@ -379,7 +379,7 @@ export default function EvaluationPage() {
                               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-all shadow-2xs cursor-pointer"
                             >
                               <Sparkles className="w-3.5 h-3.5" />
-                              <span>Muat 5 Test Case BPJS</span>
+                              <span>Muat 5 Test Case Standar</span>
                             </button>
                             <button
                               type="button"
@@ -514,8 +514,8 @@ export default function EvaluationPage() {
                       </option>
                     ))
                   ) : (
-                    <option value="BPJS Customer Service Agent">
-                      {isLoadingAgents ? "Memuat daftar agent..." : "BPJS Customer Service Agent"}
+                    <option value="Custom Agent">
+                      {isLoadingAgents ? "Memuat daftar agent..." : "Custom Agent"}
                     </option>
                   )}
                 </select>
@@ -529,7 +529,7 @@ export default function EvaluationPage() {
                   type="text"
                   value={inputScenario}
                   onChange={(e) => setInputScenario(e.target.value)}
-                  placeholder="contoh: Cari RS BPJS di Jakarta"
+                  placeholder="contoh: Cek status pesanan atau lacak pengiriman"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   required
                 />

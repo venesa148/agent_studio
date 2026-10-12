@@ -28,7 +28,11 @@ async def list_tools(db: AsyncSession = Depends(get_db)):
             usedBy=t.used_by or "All agents",
             input_schema=t.input_schema,
             mcp_server_id=t.mcp_server_id,
-            created_at=t.created_at
+            created_at=t.created_at,
+            is_active=t.is_active,
+            status=t.status or "published",
+            effect=t.effect or "read",
+            implementation=t.implementation
         )
         for t in tools
     ]
@@ -173,3 +177,38 @@ async def delete_tool(tool_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(tool)
     await db.commit()
     return None
+
+@router.post("/{tool_id_or_name}/publish", response_model=ToolResponse)
+async def publish_tool(tool_id_or_name: str, db: AsyncSession = Depends(get_db)):
+    """
+    Mempromosikan status tool dari 'draft' atau 'approved' menjadi 'published' (Bagan A Tahap 8).
+    """
+    from sqlalchemy import or_
+    result = await db.execute(
+        select(ToolModel).where(
+            or_(ToolModel.id == tool_id_or_name, ToolModel.name == tool_id_or_name)
+        )
+    )
+    tool = result.scalar_one_or_none()
+    if not tool:
+        raise HTTPException(status_code=404, detail=f"Tool '{tool_id_or_name}' not found.")
+
+    tool.status = "published"
+    await db.commit()
+    await db.refresh(tool)
+    return ToolResponse(
+        id=tool.id,
+        name=tool.name,
+        description=tool.description,
+        source=tool.source_type,
+        auth=tool.auth_custody or "none",
+        health=tool.health_status,
+        usedBy=tool.used_by or "All agents",
+        input_schema=tool.input_schema,
+        mcp_server_id=tool.mcp_server_id,
+        created_at=tool.created_at,
+        is_active=tool.is_active,
+        status=tool.status or "published",
+        effect=tool.effect or "read",
+        implementation=tool.implementation
+    )

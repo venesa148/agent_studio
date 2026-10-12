@@ -36,5 +36,8 @@ class ToolResponse(BaseModel):
     mcp_server_id: Optional[str] = None
     created_at: datetime
     is_active: bool = True
+    status: Optional[str] = "published"
+    effect: Optional[str] = "read"
+    implementation: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)

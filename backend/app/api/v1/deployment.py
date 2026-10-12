@@ -44,11 +44,11 @@ class PublishResponse(BaseModel):
 # In-memory deployment registry (MVP)
 current_deployment: Dict[str, Any] = {
     "status": "ready_to_publish",
-    "agent_id": "bpjs-triase-rs-001",
-    "agent_name": "Agent Triase BPJS RS",
+    "agent_id": "custom-agent-001",
+    "agent_name": "Custom Production Agent",
     "version": 1,
-    "slug": "bpjs-triase-rs",
-    "endpoint": f"{AWS_RUNTIME_URL}/agents/bpjs-triase-rs/invoke",
+    "slug": "custom-production-agent",
+    "endpoint": f"{AWS_RUNTIME_URL}/agents/custom-production-agent/invoke",
     "api_key": "agy_live_9f82a17b8c34e91204",
     "access_level": "Public",
     "deployed_at": "-",
@@ -270,8 +270,8 @@ async def publish_agent(payload: PublishRequest):
     now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
     current_deployment["status"] = "live"
-    current_deployment["agent_id"] = spec.get("agent_id", "bpjs-triase-rs-001")
-    current_deployment["agent_name"] = spec.get("name", "Agent Triase BPJS RS")
+    current_deployment["agent_id"] = spec.get("agent_id", "custom-agent-001")
+    current_deployment["agent_name"] = spec.get("name", "Custom Production Agent")
     current_deployment["version"] = spec.get("version", 1)
     current_deployment["slug"] = clean_slug
     current_deployment["endpoint"] = target_endpoint

@@ -35,8 +35,31 @@ interface Message {
   text: string;
   spec?: AgentSpecData;
   is_draft?: boolean;
+  new_tools?: any[];
+  coverage?: {
+    satisfied: number;
+    total: number;
+    percent: number;
+    can_build: boolean;
+    items: Record<string, string>;
+  };
   time?: string;
 }
+
+const COVERAGE_LABELS: Record<string, { title: string; desc: string }> = {
+  C1: { title: "Tujuan Agent", desc: "Tugas utama & hasil akhir agent" },
+  C2: { title: "Pengguna Agent", desc: "Target peran / divisi pengguna" },
+  C3: { title: "Sumber Data / Sistem", desc: "Endpoint API, database, atau MCP" },
+  C4: { title: "Tindakan yang Boleh", desc: "Hak aksi baca vs mutasi data (write)" },
+  C5: { title: "Larangan & Batasan", desc: "Topik yang dilarang dibahas" },
+  C6: { title: "Fallback Gagal", desc: "Perilaku saat data kosong / API error" },
+  C7: { title: "Gaya Jawaban", desc: "Nada bicara, bahasa, dan format respons" },
+  C8: { title: "Batas Pemakaian", desc: "Maksimal pemanggilan tool & turn" },
+  C9: { title: "Data Sensitif (PII)", desc: "Penyensoran NIK / data rahasia" },
+  C10: { title: "Handoff ke Manusia", desc: "Eskalasi ke staf manusia" },
+  C11: { title: "Kasus Uji Benar", desc: "Contoh dialog normal & kasus ditolak" },
+  C12: { title: "Dokumen Acuan", desc: "Dokumen SOP / FAQ rujukan" },
+};
 
 interface BuildAgentChatPaneProps {
   activeAgent?: AgentSpecData | null;
@@ -329,6 +352,8 @@ export function BuildAgentChatPane({
         text: data.message || `Draf spesifikasi Agent telah diperbarui.`,
         spec: data.spec,
         is_draft: data.is_draft,
+        new_tools: data.new_tools || [],
+        coverage: data.coverage,
         time: "Baru saja",
       };
 
@@ -534,6 +559,44 @@ export function BuildAgentChatPane({
     }
   };
 
+  const handlePublishTool = async (toolName: string) => {
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/tools/${toolName}/publish`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("Gagal menerbitkan tool.");
+      const published = await res.json();
+      setSaveSuccessMsg(`Tool '${toolName}' berhasil diterbitkan (status: published)! Kini siap dipakai di Chat Test.`);
+      setTimeout(() => setSaveSuccessMsg(null), 5000);
+
+      setDbTools((prev) => {
+        const idx = prev.findIndex((t) => t.name === toolName);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], status: "published" };
+          return updated;
+        }
+        return [...prev, published];
+      });
+
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.new_tools) {
+            return {
+              ...m,
+              new_tools: m.new_tools.map((nt: any) =>
+                nt.name === toolName ? { ...nt, status: "published" } : nt
+              ),
+            };
+          }
+          return m;
+        })
+      );
+    } catch (e: any) {
+      setErrorMessage(e.message || "Gagal menerbitkan tool.");
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-white border-r border-slate-200/80 min-w-0">
       {/* Top Bar */}
@@ -611,7 +674,7 @@ export function BuildAgentChatPane({
               Kirim instruksi untuk membuat AI Agent baru.
             </p>
             <p className="text-xs text-slate-400 mt-1 max-w-sm">
-              Tulis kebutuhan Anda dalam bahasa natural (contoh: &ldquo;Buat agent CS BPJS yang bisa cari RS dan cek rujukan&rdquo;).
+              Tulis kebutuhan Anda dalam bahasa natural (contoh: &ldquo;Buat asisten toko online untuk cek status pesanan dan lacak nomor resi&rdquo;).
             </p>
           </div>
         ) : (
@@ -643,6 +706,73 @@ export function BuildAgentChatPane({
                     </div>
                   )}
                 </div>
+
+                {/* Indikator Kelengkapan 12 Poin Wajib (Slide 5: Cek Kelengkapan / Bagan A) */}
+                {msg.coverage && (
+                  <div className="ml-10 rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/70 via-white to-indigo-50/30 p-3 shadow-2xs space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-md bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">
+                          12
+                        </div>
+                        <span className="text-xs font-bold text-slate-800">
+                          Cek Kelengkapan 12 Poin (Bagan A)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold text-indigo-700">
+                          {msg.coverage.satisfied}/12 Poin ({msg.coverage.percent}%)
+                        </span>
+                        {msg.coverage.can_build ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            ✓ Lengkap
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                            ⏳ Wawancara
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="w-full bg-slate-200/80 h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-indigo-500 to-emerald-500 h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(100, Math.max(8, msg.coverage.percent))}%` }}
+                      />
+                    </div>
+
+                    {/* Compact 12 Poin Grid */}
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1.5 pt-1">
+                      {Array.from({ length: 12 }, (_, i) => {
+                        const key = `C${i + 1}`;
+                        const status = msg.coverage?.items?.[key] || "kosong";
+                        const label = COVERAGE_LABELS[key] || { title: key, desc: "" };
+                        const isDone = status === "terisi" || status === "tidak_berlaku" || status === "diserahkan";
+                        return (
+                          <div
+                            key={key}
+                            className={`p-1.5 rounded-lg border text-center transition-all ${
+                              isDone
+                                ? "bg-emerald-50/80 border-emerald-200 text-emerald-800 shadow-2xs"
+                                : "bg-white/80 border-slate-200/80 text-slate-500"
+                            }`}
+                            title={`${key}: ${label.title} (${status}) - ${label.desc}`}
+                          >
+                            <div className="text-[10px] font-bold font-mono">
+                              {isDone ? "✓ " : "○ "}
+                              {key}
+                            </div>
+                            <div className="text-[9px] truncate font-medium">
+                              {label.title}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Generated Spec Preview Card (Studio Bento Deck Layout) */}
                 {msg.spec && (
@@ -935,6 +1065,103 @@ export function BuildAgentChatPane({
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Tool Factory Card (Bagan A Delapan Tahap: Draf Tool Baru Dirancang) */}
+                {msg.new_tools && msg.new_tools.length > 0 && (
+                  <div className="ml-10 mt-3 rounded-2xl border border-amber-200/90 bg-gradient-to-br from-amber-50/50 via-white to-amber-50/20 shadow-xs overflow-hidden">
+                    <div className="px-4 py-3 bg-amber-50/70 border-b border-amber-200/80 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                          <Wrench className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-900">
+                              Tool Baru Dirancang (Tool Factory)
+                            </span>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                              Bagan A
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500">
+                            Dirancang otomatis dari endpoint API yang Anda berikan. Status: draf menunggu penerbitan.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 space-y-2.5">
+                      {msg.new_tools.map((nt: any, idx: number) => {
+                        const isPublished = nt.status === "published" || dbTools.find((t) => t.name === nt.name)?.status === "published";
+                        const impl = nt.implementation || {};
+                        return (
+                          <div
+                            key={nt.name || idx}
+                            className="p-3 rounded-xl bg-white border border-slate-200/80 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3"
+                          >
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono text-xs font-bold text-slate-800">
+                                  {nt.name}()
+                                </span>
+                                <span
+                                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase font-sans ${
+                                    impl.method === "POST" ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800"
+                                  }`}
+                                >
+                                  {impl.method || "GET"}
+                                </span>
+                                <span
+                                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase font-sans ${
+                                    nt.effect === "write" ? "bg-rose-100 text-rose-800" : "bg-cyan-100 text-cyan-800"
+                                  }`}
+                                >
+                                  {nt.effect || "read"}
+                                </span>
+                                <span
+                                  className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase font-sans border ${
+                                    isPublished
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                      : "bg-amber-50 text-amber-700 border-amber-200"
+                                  }`}
+                                >
+                                  {isPublished ? "✓ Terbit (Published)" : "● Draf (Draft)"}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-600 line-clamp-2">
+                                {nt.description}
+                              </p>
+                              {impl.url && (
+                                <p className="text-[10px] font-mono text-slate-400 truncate">
+                                  Target: {impl.url}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="shrink-0 flex items-center gap-2">
+                              {!isPublished ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handlePublishTool(nt.name)}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                                  title="Terbitkan tool agar bisa dipakai di Chat Test"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Terbitkan Tool</span>
+                                </button>
+                              ) : (
+                                <span className="text-[11px] font-medium text-emerald-700 flex items-center gap-1 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Siap di Chat Test</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>

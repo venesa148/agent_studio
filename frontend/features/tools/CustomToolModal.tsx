@@ -21,12 +21,10 @@ interface ParamField {
 }
 
 const REGISTERED_BACKEND_FUNCTIONS = [
-  { id: "check_bpjs", label: "check_bpjs(hospital_id)" },
-  { id: "search_hospital", label: "search_hospital(city, bpjs)" },
-  { id: "get_hospital_detail", label: "get_hospital_detail(hospital_id)" },
-  { id: "find_specialist", label: "find_specialist(specialty, city)" },
-  { id: "get_referral_status", label: "get_referral_status(referral_id)" },
-  { id: "knowledge_search", label: "knowledge_search(query)" },
+  { id: "search_web", label: "search_web(query)" },
+  { id: "calculator", label: "calculator(expression)" },
+  { id: "api_fetch", label: "api_fetch(url, method, body)" },
+  { id: "http_request", label: "http_request(url, headers)" },
 ];
 
 interface CustomToolModalProps {
@@ -104,11 +102,9 @@ export function CustomToolModal({
       setIsTesting(false);
       setTestStatus("success");
       setTestOutput({
-        hospital_id: testInputs["hospital_id"] || "RS-01",
-        hospital_name: "RS Cipto Mangunkusumo",
-        bpjs_active: true,
-        quota_available: 14,
         status: "OK",
+        executed_params: testInputs,
+        timestamp: new Date().toISOString(),
       });
     }, 800);
   };
@@ -175,7 +171,7 @@ export function CustomToolModal({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. check_bpjs"
+              placeholder="e.g. check_order_status"
               className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500 focus:ring-2 focus:ring-blue-100 font-mono text-xs"
               required
             />
