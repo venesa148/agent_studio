@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   ChevronsLeft,
   ChevronsRight,
@@ -13,7 +13,6 @@ import {
   Rocket,
   CheckCircle2,
   Settings,
-  HelpCircle,
   Sparkles,
 } from "lucide-react";
 import { getDrafts, subscribeToDrafts, AgentDraft } from "@/lib/draftStore";
@@ -25,32 +24,74 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const currentAgentId = searchParams ? searchParams.get("id") : null;
+  const currentDraftId = searchParams ? searchParams.get("draft_id") : null;
+
   const [isCollapsed, setIsCollapsed] = useState(collapsed);
   const [showWorkflowToast, setShowWorkflowToast] = useState(false);
-  const [dbAgents, setDbAgents] = useState<{ id: string; name: string }[]>([]);
+  const [dbAgents, setDbAgents] = useState<{ id: string; name: string; status?: string }[]>([]);
   const [drafts, setDrafts] = useState<AgentDraft[]>([]);
+  const [toolsCount, setToolsCount] = useState<number | null>(null);
+  const [deploymentsCount, setDeploymentsCount] = useState<number | null>(null);
+  const [evaluationsCount, setEvaluationsCount] = useState<number | null>(null);
 
   useEffect(() => {
     setDrafts(getDrafts());
     const unsubscribe = subscribeToDrafts((updated) => setDrafts(updated));
 
-    const fetchDbAgents = async () => {
+    const fetchAllData = async () => {
       try {
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
-        const res = await fetch(`${apiUrl}/api/v1/agent`);
-        if (res.ok) {
-          const data = await res.json();
+        
+        // 1. Fetch Agents
+        const resAgents = await fetch(`${apiUrl}/api/v1/agent`);
+        if (resAgents.ok) {
+          const data = await resAgents.json();
           if (Array.isArray(data)) {
-            setDbAgents(data.slice(0, 5));
+            setDbAgents(data);
+          }
+        }
+
+        // 2. Fetch Tools Count (Dinamis dari Database)
+        const resTools = await fetch(`${apiUrl}/api/v1/tools`);
+        if (resTools.ok) {
+          const tData = await resTools.json();
+          if (Array.isArray(tData)) {
+            setToolsCount(tData.length);
+          }
+        }
+
+        // 3. Fetch Deployment Count
+        const resDeploy = await fetch(`${apiUrl}/api/v1/deployment/status`);
+        if (resDeploy.ok) {
+          const dData = await resDeploy.json();
+          setDeploymentsCount(dData && dData.status === "live" ? 1 : 0);
+        }
+
+        // 4. Fetch Evaluations Count
+        const resEvals = await fetch(`${apiUrl}/api/v1/evaluation`);
+        if (resEvals.ok) {
+          const eData = await resEvals.json();
+          if (Array.isArray(eData)) {
+            setEvaluationsCount(eData.length);
           }
         }
       } catch (e) {
         // ignore
       }
     };
-    fetchDbAgents();
 
-    return () => unsubscribe();
+    fetchAllData();
+
+    // Listen to custom event for agent creation / refresh
+    const handleRefresh = () => fetchAllData();
+    window.addEventListener("agent_updated", handleRefresh);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener("agent_updated", handleRefresh);
+    };
   }, []);
 
   const handleToggle = () => {
@@ -70,7 +111,7 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
       name: "Workflows",
       href: "#",
       icon: GitBranch,
-      count: 6,
+      count: 2,
       isTestOnly: true,
       active: false,
     },
@@ -78,47 +119,49 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
       name: "Tools",
       href: "/registry",
       icon: Wrench,
-      count: 8,
+      count: toolsCount,
       active: pathname === "/registry",
     },
     {
       name: "Deployments",
       href: "/deployments",
       icon: Rocket,
-      count: 4,
+      count: deploymentsCount,
       active: pathname === "/deployments",
     },
     {
       name: "Evaluations & Tests",
       href: "/evaluation",
       icon: CheckCircle2,
-      count: null,
+      count: evaluationsCount,
       active: pathname === "/evaluation",
     },
   ];
 
   return (
     <aside
-      className={`relative flex flex-col h-screen border-r border-slate-200/90 bg-[#fafbfe] transition-all duration-200 select-none ${isCollapsed ? "w-[68px]" : "w-[260px]"
-        }`}
+      className={`relative flex flex-col h-screen border-r border-slate-200/90 bg-[#fafbfe] transition-all duration-200 select-none ${
+        isCollapsed ? "w-[68px]" : "w-[260px]"
+      }`}
     >
       {/* Header: Logo & Collapse Button */}
       <div className="flex items-center justify-between px-4 h-14 border-b border-slate-200/80">
         {!isCollapsed && (
-          <div className="flex items-center gap-2 overflow-hidden">
-            <div className="h-7 w-7 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-xs">
+          <Link href="/" className="flex items-center gap-2 overflow-hidden group">
+            <div className="h-7 w-7 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform">
               <Sparkles className="w-4 h-4" />
             </div>
             <span className="text-xs font-bold tracking-wider text-slate-800 uppercase">
               Agent Studio
             </span>
-          </div>
+          </Link>
         )}
 
         <button
+          type="button"
           onClick={handleToggle}
-          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors mx-auto"
+          title={isCollapsed ? "Buka sidebar" : "Tutup sidebar"}
+          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors mx-auto cursor-pointer"
         >
           {isCollapsed ? (
             <ChevronsRight className="w-4 h-4" />
@@ -132,7 +175,7 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
       <div className="p-3">
         <Link
           href="/?new=true"
-          className={`flex items-center justify-center gap-2 w-full py-2 px-3 rounded-full border border-blue-200 bg-white hover:bg-blue-50/70 text-blue-600 font-medium text-sm transition-all shadow-2xs hover:shadow-xs group`}
+          className="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-full border border-blue-200 bg-white hover:bg-blue-50/70 text-blue-600 font-medium text-sm transition-all shadow-2xs hover:shadow-xs group cursor-pointer"
         >
           <Plus className="w-4 h-4 text-blue-600 group-hover:rotate-90 transition-transform duration-200" />
           {!isCollapsed && <span>New Agent</span>}
@@ -155,25 +198,28 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
                     setTimeout(() => setShowWorkflowToast(false), 2500);
                   }
                 }}
-                className={`flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-colors ${item.active
-                  ? "bg-blue-50/80 text-blue-700 font-semibold"
-                  : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900"
-                  }`}
+                className={`flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
+                  item.active
+                    ? "bg-blue-50/80 text-blue-700 font-semibold"
+                    : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900"
+                }`}
                 title={isCollapsed ? item.name : undefined}
               >
                 <div className="flex items-center gap-2.5 truncate">
                   <Icon
-                    className={`w-4 h-4 shrink-0 ${item.active ? "text-blue-600" : "text-slate-500"
-                      }`}
+                    className={`w-4 h-4 shrink-0 ${
+                      item.active ? "text-blue-600" : "text-slate-500"
+                    }`}
                   />
                   {!isCollapsed && <span className="truncate">{item.name}</span>}
                 </div>
-                {!isCollapsed && item.count !== null && (
+                {!isCollapsed && item.count !== null && item.count !== undefined && (
                   <span
-                    className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${item.active
-                      ? "bg-blue-600 text-white"
-                      : "bg-slate-200/70 text-slate-700"
-                      }`}
+                    className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${
+                      item.active
+                        ? "bg-blue-600 text-white"
+                        : "bg-slate-200/70 text-slate-700"
+                    }`}
                   >
                     {item.count}
                   </span>
@@ -192,53 +238,81 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
                 <div className="px-3 pb-1.5 text-[10px] font-bold tracking-wider text-amber-700 uppercase flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                    Draf Aktif
+                    Draf Lokal
                   </span>
                   <span className="text-[10px] px-1.5 py-0.2 bg-amber-100 rounded text-amber-800 font-semibold">
                     {drafts.length}
                   </span>
                 </div>
                 <div className="space-y-0.5">
-                  {drafts.map((d) => (
-                    <Link
-                      key={d.id}
-                      href={`/?draft_id=${d.id}`}
-                      className="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs text-amber-950 bg-amber-50/60 hover:bg-amber-100/80 transition-colors text-left group"
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                        <span className="truncate font-medium">{d.name || "Draf Baru"}</span>
-                      </div>
-                      <span className="text-[10px] text-amber-700 shrink-0 font-medium">
-                        Lanjut
-                      </span>
-                    </Link>
-                  ))}
+                  {drafts.map((d) => {
+                    const isDraftSelected = currentDraftId === d.id;
+                    return (
+                      <Link
+                        key={d.id}
+                        href={`/?draft_id=${d.id}`}
+                        className={`flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors text-left group ${
+                          isDraftSelected
+                            ? "bg-amber-100/90 text-amber-950 font-semibold shadow-2xs"
+                            : "text-amber-950 bg-amber-50/60 hover:bg-amber-100/80"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                          <span className="truncate font-medium">{d.name || "Draf Baru"}</span>
+                        </div>
+                        <span className="text-[10px] text-amber-700 shrink-0 font-medium">
+                          {isDraftSelected ? "Aktif" : "Lanjut"}
+                        </span>
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
             {/* 2. Recent Saved Agents */}
             <div>
-              <div className="px-3 pb-1.5 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                Recent Agents
+              <div className="px-3 pb-1.5 text-[10px] font-bold tracking-wider text-slate-400 uppercase flex items-center justify-between">
+                <span>Recent Agents</span>
+                {dbAgents.length > 0 && (
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {dbAgents.length}
+                  </span>
+                )}
               </div>
               {dbAgents.length > 0 ? (
                 <div className="space-y-0.5">
-                  {dbAgents.map((agent) => (
-                    <Link
-                      key={agent.id}
-                      href={`/?id=${agent.id}`}
-                      className="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors text-left group"
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                        <span className="truncate text-slate-700 group-hover:text-slate-900">
-                          {agent.name}
-                        </span>
-                      </div>
-                    </Link>
-                  ))}
+                  {dbAgents.map((agent) => {
+                    const isSelected = currentAgentId === agent.id;
+                    return (
+                      <Link
+                        key={agent.id}
+                        href={`/?id=${agent.id}`}
+                        className={`flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors text-left group ${
+                          isSelected
+                            ? "bg-blue-100/80 text-blue-900 font-semibold shadow-2xs"
+                            : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              isSelected ? "bg-blue-600" : "bg-emerald-500"
+                            }`}
+                          />
+                          <span className="truncate text-slate-700 group-hover:text-slate-900">
+                            {agent.name}
+                          </span>
+                        </div>
+                        {isSelected && (
+                          <span className="text-[9px] px-1 rounded bg-blue-200 text-blue-800 font-bold shrink-0">
+                            Aktif
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
                 </div>
               ) : drafts.length === 0 ? (
                 <div className="px-3 py-1 text-[11px] text-slate-400">
@@ -262,11 +336,15 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
                 <span className="text-xs font-semibold text-slate-800 leading-tight">
                   Studio Workspace
                 </span>
+                <span className="text-[10px] text-slate-400">
+                  Universal Builder
+                </span>
               </div>
             </div>
             <button
+              type="button"
               title="Settings"
-              className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
             >
               <Settings className="w-3.5 h-3.5" />
             </button>

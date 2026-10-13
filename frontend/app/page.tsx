@@ -4,6 +4,7 @@ import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Sidebar } from "@/components/navigation/Sidebar";
 import { ConfigureNav, ConfigureTab } from "@/components/navigation/ConfigureNav";
+import { ConfigurePanes } from "@/features/builder/ConfigurePanes";
 import { BuildAgentChatPane } from "@/features/builder/BuildAgentChatPane";
 import { TestAgentPane } from "@/features/chat/TestAgentPane";
 import { getDraftById } from "@/lib/draftStore";
@@ -145,15 +146,26 @@ function HomePageContent() {
       <ConfigureNav
         activeTab={activeConfigureTab}
         onSelectTab={(tab) => setActiveConfigureTab(tab)}
+        onBack={handleClearActiveAgent}
+        activeAgent={activeAgent}
       />
 
-      {/* 3. Pane Chat Build Agent (Tengah) */}
-      <BuildAgentChatPane
-        activeAgent={activeAgent}
-        activeDraftId={draftId}
-        onAgentCreated={handleAgentCreatedOrUpdated}
-        onClearActiveAgent={handleClearActiveAgent}
-      />
+      {/* 3. Pane Tengah: Ghostwriter (Chat Build) atau Sub-panel Konfigurasi Aktif */}
+      {activeConfigureTab === "ghostwriter" ? (
+        <BuildAgentChatPane
+          activeAgent={activeAgent}
+          activeDraftId={draftId}
+          onAgentCreated={handleAgentCreatedOrUpdated}
+          onClearActiveAgent={handleClearActiveAgent}
+        />
+      ) : (
+        <ConfigurePanes
+          activeTab={activeConfigureTab}
+          activeAgent={activeAgent}
+          onUpdateAgent={handleAgentCreatedOrUpdated}
+          onSwitchToGhostwriter={() => setActiveConfigureTab("ghostwriter")}
+        />
+      )}
 
       {/* 4. Pane Chat Test Agent (Kanan) */}
       <TestAgentPane
