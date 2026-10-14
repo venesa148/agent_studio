@@ -180,75 +180,6 @@ class BuilderService:
         if not prompt_trimmed:
             raise ValueError("Prompt tidak boleh kosong.")
 
-        # Deteksi otomatis apakah pengguna memberikan URL / endpoint baru dalam percakapan
-        found_urls = re.findall(r"https?://[^\s'\"<>]+", prompt_trimmed)
-        if found_urls:
-            raw_url = found_urls[0].rstrip("/")
-            parsed_u = urlparse(raw_url)
-            new_base_url = f"{parsed_u.scheme}://{parsed_u.netloc}"
-            
-            # 1. Update in-memory settings langsung
-            settings.EXTERNAL_MOCK_API_URL = new_base_url
-            
-            # 2. Update file .env di disk secara aman agar tidak tertinggal
-            try:
-                env_paths = [".env", "backend/.env", "../backend/.env"]
-                for ep in env_paths:
-                    if os.path.exists(ep):
-                        with open(ep, "r", encoding="utf-8") as f_env:
-                            env_content = f_env.read()
-                        if "EXTERNAL_MOCK_API_URL=" in env_content:
-                            new_env_content = re.sub(
-                                r"EXTERNAL_MOCK_API_URL=[^\r\n]*",
-                                f"EXTERNAL_MOCK_API_URL={new_base_url}",
-                                env_content
-                            )
-                            with open(ep, "w", encoding="utf-8") as f_env:
-                                f_env.write(new_env_content)
-            except Exception as e_env:
-                print(f"[Warning] Gagal update .env: {e_env}")
-
-            # 3. Update semua tools HTTP di database agar mengarah ke base URL baru
-            try:
-                tools_to_update = await db.execute(
-                    select(ToolModel).where(
-                        or_(
-                            ToolModel.source_type == "http",
-                            ToolModel.implementation.isnot(None)
-                        )
-                    )
-                )
-                for t in tools_to_update.scalars().all():
-                    if t.implementation and isinstance(t.implementation, dict):
-                        old_url = t.implementation.get("url", "")
-                        old_parsed = urlparse(old_url)
-                        if old_parsed.netloc:
-                            updated_url = f"{new_base_url}{old_parsed.path}"
-                            if old_parsed.query:
-                                updated_url += f"?{old_parsed.query}"
-                            new_impl = dict(t.implementation)
-                            new_impl["url"] = updated_url
-                            t.implementation = new_impl
-                            flag_modified(t, "implementation")
-                    elif t.source_type == "http":
-                        endpoint_path = f"/api/v1/{t.name.replace('_', '-')}"
-                        t.implementation = {
-                            "type": "http",
-                            "url": f"{new_base_url}{endpoint_path}",
-                            "method": "GET"
-                        }
-                        flag_modified(t, "implementation")
-                
-                # 4. Update mcp_servers jika ada yang menunjuk ke URL mock/trycloudflare lama
-                mcp_to_update = await db.execute(select(MCPServerModel))
-                for m in mcp_to_update.scalars().all():
-                    if m.url and ("trycloudflare.com" in m.url or "mock" in m.url):
-                        m.url = f"{new_base_url}/"
-                
-                await db.commit()
-            except Exception as e_db:
-                print(f"[Warning] Gagal update tools dengan URL baru: {e_db}")
-
         # Ambil daftar tools yang aktif 100% DINAMIS dari database
         db_tools_result = await db.execute(select(ToolModel).where(ToolModel.is_active == True))
         db_tools = db_tools_result.scalars().all()
@@ -369,9 +300,11 @@ class BuilderService:
                 if not content and hasattr(msg_obj, "reasoning") and msg_obj.reasoning:
                     content = msg_obj.reasoning
                 try:
-                    with open(r"C:\Users\ASUS\Magang\compare\NewCompare\zenit\FE\agent_studio\backend\scratch\last_llm_response.txt", "w", encoding="utf-8") as f:
-                        f.write(content)
-                except Exception as e_w:
+                    from pathlib import Path
+                    scratch_dir = Path(__file__).resolve().parents[2] / "scratch"
+                    scratch_dir.mkdir(parents=True, exist_ok=True)
+                    (scratch_dir / "last_llm_response.txt").write_text(content, encoding="utf-8")
+                except Exception:
                     pass
                 parsed = None
                 # Coba 1: Blok markdown ```json ... ```

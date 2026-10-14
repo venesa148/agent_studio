@@ -22,23 +22,9 @@ async def get_trace_log(run_id: str, db: AsyncSession = Depends(get_db)):
     logs = result.scalars().all()
 
     if not logs:
-        # Return fallback trace steps for demonstration/test
-        steps = [
-            TraceStepResponse(
-                step_no=1,
-                type="tool_execution",
-                title=f"Execute tool search_web for {run_id}",
-                duration_ms=120,
-                detail={"run_id": run_id, "status": "completed"},
-                status="ok"
-            )
-        ]
-        return TraceRunResponse(
-            run_id=run_id,
-            status="OK",
-            total_duration_ms=120,
-            total_tokens=150,
-            steps=steps
+        raise HTTPException(
+            status_code=404,
+            detail=f"Trace log untuk run_id '{run_id}' tidak ditemukan dalam database."
         )
 
     steps = [

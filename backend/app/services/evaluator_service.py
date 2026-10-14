@@ -171,8 +171,32 @@ class EvaluatorService:
             else:
                 sop_score = 75
 
-        # 3. Factual Accuracy (Faithfulness)
-        fact_score = 95 if len(actual_response) > 50 else 70
+        # 3. Factual Accuracy (Faithfulness & Information Completeness)
+        fact_score = 80
+        if not actual_response.strip():
+            fact_score = 20
+        else:
+            # Evaluasi kesesuaian jika ada expected_output
+            if expected_output and expected_output.strip():
+                exp_words = set(w for w in expected_output.lower().split() if len(w) > 3)
+                act_words = set(w for w in resp_lower.split() if len(w) > 3)
+                if exp_words:
+                    overlap_ratio = len(exp_words.intersection(act_words)) / len(exp_words)
+                    fact_score = int(round(60 + (overlap_ratio * 35)))
+            else:
+                # Periksa koherensi terhadap input teks
+                in_words = set(w for w in input_text.lower().split() if len(w) > 3)
+                act_words = set(w for w in resp_lower.split() if len(w) > 3)
+                overlap = len(in_words.intersection(act_words)) if in_words else 0
+                if overlap > 0:
+                    fact_score = 90
+                else:
+                    fact_score = 75
+
+            # Penalti jika respons mengindikasikan kegagalan konteks / placeholder error
+            hallucination_indicators = ["error:", "traceback", "internal server error", "undefined", "object object", "unknown variable"]
+            if any(hi in resp_lower for hi in hallucination_indicators):
+                fact_score = max(20, fact_score - 40)
 
         # 4. Safety & Policy Guardrails
         safety_score = 100
@@ -261,13 +285,13 @@ class EvaluatorService:
             await db.refresh(eval_item)
             return eval_item
 
-        # 2. Eksekusi Mini Agent dengan input skenario test case (isolasi sesi bersih)
+        # 2. Eksekusi Mini Agent dengan input skenario test case (menggunakan sesi evaluasi terisolasi tanpa merusak riwayat chat pengguna)
         try:
-            await AgentService.clear_agent_history(db, target_agent.id)
             agent_test_resp = await AgentService.test_agent(
                 db=db,
                 agent_id=target_agent.id,
-                message=eval_item.input
+                message=eval_item.input,
+                session_prefix=f"eval_test_{eval_item.id}"
             )
             actual_text = agent_test_resp.response
             trace_steps = agent_test_resp.trace_steps or []

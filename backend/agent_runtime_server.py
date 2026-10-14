@@ -296,10 +296,12 @@ class AgentRuntimeEngine:
             "params": params
         }
 
-    async def execute_llm_step(self, user_message: str) -> Tuple[str, List[Dict[str, Any]]]:
+    async def execute_llm_step(
+        self, user_message: str, history: Optional[List[Dict[str, str]]] = None
+    ) -> Tuple[str, List[Dict[str, Any]]]:
         """
         Autonomous ReAct Agent Loop:
-        - Mendukung multi-turn tool calling secara berurutan
+        - Mendukung multi-turn tool calling secara berurutan dan riwayat percakapan
         - Mendukung format function calling OpenAI JSON resmi
         - Fallback Regex Interceptor jika model (misal GLM / ChatGLM) mencetak <tool_call> di teks
         - Otomatis merangkum hasil tool menjadi jawaban ramah & profesional
@@ -329,9 +331,13 @@ class AgentRuntimeEngine:
         client = AsyncOpenAI(api_key=api_key, base_url=base_url, default_headers=headers)
 
         messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_message}
+            {"role": "system", "content": self.system_prompt}
         ]
+        if history:
+            for h in history[-20:]:
+                if h.get("role") in ["user", "assistant"] and h.get("content"):
+                    messages.append({"role": h["role"], "content": h["content"]})
+        messages.append({"role": "user", "content": user_message})
 
         executed_tools: List[Dict[str, Any]] = []
         max_turns = 5
@@ -460,10 +466,22 @@ class AgentRuntimeEngine:
         return fallback, executed_tools
 
     async def run_step(self, session_id: str, user_message: str) -> InvokeResponse:
-        session = session_memory.setdefault(session_id, {"turn_count": 0})
+        # Batasi ukuran session_memory agar tidak terjadi memory leak (maksimal 1000 sesi)
+        if len(session_memory) > 1000:
+            oldest_keys = list(session_memory.keys())[:200]
+            for ok in oldest_keys:
+                session_memory.pop(ok, None)
+
+        session = session_memory.setdefault(session_id, {"turn_count": 0, "history": []})
         session["turn_count"] += 1
 
-        response_text, tool_calls = await self.execute_llm_step(user_message)
+        history = session.get("history", [])
+        response_text, tool_calls = await self.execute_llm_step(user_message, history=history)
+
+        # Simpan interaksi ke riwayat session untuk multi-turn context
+        history.append({"role": "user", "content": user_message})
+        history.append({"role": "assistant", "content": response_text})
+        session["history"] = history[-30:]
 
         return InvokeResponse(
             session_id=session_id,

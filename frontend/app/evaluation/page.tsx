@@ -92,7 +92,7 @@ export default function EvaluationPage() {
         body: JSON.stringify({
           agent: agentTarget,
           input: inputScenario,
-          expected: expectedTool || "search_hospital",
+          expected: expectedTool.trim() || "Jawaban relevan & akurat",
         }),
       });
       

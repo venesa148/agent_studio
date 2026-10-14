@@ -345,3 +345,79 @@ async def publish_agent(payload: PublishRequest, db: AsyncSession = Depends(get_
         deployed_at=now_str,
         message=f"Agent '{current_deployment['agent_name']}' berhasil dipublikasikan! {runtime_sync_msg}"
     )
+
+
+# =============================================================================
+# Plural Deployments CRUD API (Mendukung frontend /deployments page)
+# =============================================================================
+
+class CreateDeploymentRequest(BaseModel):
+    agent: str = Field(..., description="Nama agent yang di-deploy")
+    environment: str = Field(default="production", description="Environment target (production/staging)")
+    path: str = Field(..., description="Path endpoint deployment")
+    status: str = Field(default="Ready", description="Status deployment")
+
+
+class DeploymentItemResponse(BaseModel):
+    id: str
+    agent: str
+    environment: str
+    path: str
+    status: str
+    deployedAt: str
+
+
+plural_router = APIRouter(prefix="/deployments", tags=["Deployments Management CRUD"])
+
+
+@plural_router.get("", response_model=List[DeploymentItemResponse])
+async def list_deployments_crud(db: AsyncSession = Depends(get_db)):
+    """Mengambil semua daftar deployment untuk halaman Deployments di frontend"""
+    res = await db.execute(select(DeploymentModel).order_by(desc(DeploymentModel.deployedAt)))
+    records = res.scalars().all()
+    return [
+        DeploymentItemResponse(
+            id=r.id,
+            agent=r.agent,
+            environment=r.environment,
+            path=r.path,
+            status=r.status,
+            deployedAt=r.deployedAt.strftime("%Y-%m-%d %H:%M:%S UTC") if r.deployedAt else "-"
+        )
+        for r in records
+    ]
+
+
+@plural_router.post("", response_model=DeploymentItemResponse)
+async def create_deployment_crud(payload: CreateDeploymentRequest, db: AsyncSession = Depends(get_db)):
+    """Menambahkan record deployment baru secara persisten dari frontend"""
+    dep = DeploymentModel(
+        agent=payload.agent,
+        environment=payload.environment,
+        path=payload.path,
+        status=payload.status,
+        deployedAt=datetime.utcnow()
+    )
+    db.add(dep)
+    await db.commit()
+    await db.refresh(dep)
+    return DeploymentItemResponse(
+        id=dep.id,
+        agent=dep.agent,
+        environment=dep.environment,
+        path=dep.path,
+        status=dep.status,
+        deployedAt=dep.deployedAt.strftime("%Y-%m-%d %H:%M:%S UTC") if dep.deployedAt else "-"
+    )
+
+
+@plural_router.delete("/{dep_id}")
+async def delete_deployment_crud(dep_id: str, db: AsyncSession = Depends(get_db)):
+    """Menghapus deployment berdasarkan ID dari database"""
+    res = await db.execute(select(DeploymentModel).where(DeploymentModel.id == dep_id))
+    record = res.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Deployment record tidak ditemukan.")
+    await db.delete(record)
+    await db.commit()
+    return {"status": "deleted", "id": dep_id}

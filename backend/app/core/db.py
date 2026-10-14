@@ -48,7 +48,7 @@ async def init_db():
             if "status" not in cols:
                 await conn.execute(text("ALTER TABLE agent_specs ADD COLUMN status VARCHAR(50) DEFAULT 'active'"))
             if "updated_at" not in cols:
-                await conn.execute(text("ALTER TABLE agent_specs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"))
+                await conn.execute(text("ALTER TABLE agent_specs ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"))
         if "tools" in tables:
             cols = await conn.run_sync(lambda sync_conn: [c['name'] for c in inspect(sync_conn).get_columns("tools")])
             if "source_type" not in cols:

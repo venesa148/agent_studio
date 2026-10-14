@@ -149,13 +149,10 @@ class AgentService:
         if not api_key:
             raise RuntimeError("API Key LLM belum dikonfigurasi. Silakan paste OPENROUTER_API_KEY atau LLM_API_KEY di file .env backend.")
 
-        # Tentukan nama model (default ke settings.LLM_MODEL)
+        # Tentukan nama model (default ke settings.LLM_MODEL atau model spesifik agent)
         model = settings.LLM_MODEL or "z-ai/glm-5.3-flash"
-        if agent.model and agent.model not in ["gpt-4o-mini", "default", "z-ai/glm-5.3", "gemini-flash-lite-latest", "gemini-flash-latest"]:
-            if "googleapis.com" in settings.LLM_BASE_URL and "gemini" in agent.model:
-                model = agent.model
-            elif "openrouter.ai" in settings.LLM_BASE_URL and ("z-ai" in agent.model or "glm" in agent.model):
-                model = agent.model
+        if agent.model and agent.model.strip() and agent.model.strip() not in ["default", ""]:
+            model = agent.model.strip()
 
         # Header dan penyesuaian khusus jika menggunakan OpenRouter
         if "openrouter.ai" in settings.LLM_BASE_URL:
@@ -225,7 +222,8 @@ class AgentService:
         db: AsyncSession,
         agent_id: Optional[str],
         message: str,
-        draft_spec: Optional[AgentSpec] = None
+        draft_spec: Optional[AgentSpec] = None,
+        session_prefix: str = "test_session"
     ) -> AgentTestResponse:
         message_trimmed = message.strip()
         if not message_trimmed:
@@ -367,7 +365,7 @@ class AgentService:
         # ======================================================================
         # LEVEL 1: WORKING MEMORY & DATABASE PERSISTENCE
         # ======================================================================
-        conv_title = f"test_session_{test_session_id}"
+        conv_title = f"{session_prefix}_{test_session_id}"
         conv_res = await db.execute(
             select(ConversationModel)
             .where(ConversationModel.title == conv_title)
@@ -584,15 +582,13 @@ class AgentService:
         final_status = "ok"
         escalation_reasons = []
 
-        # 1. Periksa apakah salah satu hasil eksekusi tool mengindikasikan status NOT_FOUND / gagal
+        # 1. Periksa apakah salah satu hasil eksekusi tool mengalami error sistem fatal
         for step in trace_steps:
             res = step.get("result")
             if isinstance(res, dict):
                 st = str(res.get("status", "")).lower()
-                if "tidak ditemukan" in st or "not_found" in st:
-                    escalation_reasons.append(f"Hasil tool '{step.get('tool_name')}' tidak ditemukan dalam database")
-                elif st == "error" or res.get("error"):
-                    escalation_reasons.append(f"Tool '{step.get('tool_name')}' mengalami kegagalan eksekusi")
+                if st == "error" or res.get("error"):
+                    escalation_reasons.append(f"Tool '{step.get('tool_name')}' mengalami kegagalan eksekusi sistem")
 
         # 2. Periksa apakah pengguna meminta eskalasi ke staf manusia (secara fleksibel)
         import re
@@ -787,9 +783,9 @@ class AgentService:
                 "max_turns": 15,
                 "strict_grounding": True,
                 "disallowed_behaviors": [
-                    "memberi diagnosis pasti tanpa dokter",
-                    "merekomendasikan obat atau dosis spesifik",
-                    "mengabaikan keluhan yang mengindikasikan kondisi darurat"
+                    "mengarang informasi atau data fiktif di luar konteks (anti-halusinasi)",
+                    "membocorkan kredensial, API key, atau data privasi pengguna",
+                    "menjalankan aksi berisiko atau eksekusi tool tanpa persetujuan eksplisit"
                 ]
             }
         }
@@ -810,37 +806,14 @@ class AgentService:
         if save_to_disk:
             import os
             root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-            backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-            # 1. agents/{filename}
+            # Simpan secara kanonikal ke direktori agents/{filename} (Single Source of Truth)
             agents_dir = os.path.join(root_dir, "agents")
             os.makedirs(agents_dir, exist_ok=True)
             file_path = os.path.join(agents_dir, filename)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(yaml_content)
             saved_paths.append(file_path)
-
-            # 2. frontend/agent-project/agents/{filename}
-            project_agents_dir = os.path.join(root_dir, "frontend", "agent-project", "agents")
-            os.makedirs(project_agents_dir, exist_ok=True)
-            fp2 = os.path.join(project_agents_dir, filename)
-            with open(fp2, "w", encoding="utf-8") as f:
-                f.write(yaml_content)
-            saved_paths.append(fp2)
-
-            # 3. backend/{filename}
-            fp3 = os.path.join(backend_dir, filename)
-            with open(fp3, "w", encoding="utf-8") as f:
-                f.write(yaml_content)
-            saved_paths.append(fp3)
-
-            # 4. backend/deployed_agents/{filename}
-            deployed_dir = os.path.join(backend_dir, "deployed_agents")
-            os.makedirs(deployed_dir, exist_ok=True)
-            fp4 = os.path.join(deployed_dir, filename)
-            with open(fp4, "w", encoding="utf-8") as f:
-                f.write(yaml_content)
-            saved_paths.append(fp4)
 
         return {
             "agent_id": agent.id,
