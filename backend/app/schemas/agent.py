@@ -70,8 +70,9 @@ class BuilderChatResponse(BaseModel):
     coverage: Optional[Dict[str, Any]] = None
 
 class AgentTestRequest(BaseModel):
-    agent_id: str
+    agent_id: Optional[str] = None
     message: str
+    draft_spec: Optional[AgentSpec] = None
 
 class AgentTestResponse(BaseModel):
     agent_id: str

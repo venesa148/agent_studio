@@ -15,7 +15,7 @@ from app.models.agent import AgentSpecModel
 from app.models.chat import ConversationModel, MessageModel
 from app.models.tool import ToolModel
 from app.models.mcp import MCPServerModel
-from app.schemas.agent import AgentSpecCreate, AgentSpecUpdate, AgentTestResponse
+from app.schemas.agent import AgentSpec, AgentSpecCreate, AgentSpecUpdate, AgentTestResponse
 from app.services.tool_registry import ToolRegistryService
 
 DEFAULT_BUILTIN_SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -221,13 +221,36 @@ class AgentService:
         return False
 
     @staticmethod
-    async def test_agent(db: AsyncSession, agent_id: str, message: str) -> AgentTestResponse:
+    async def test_agent(
+        db: AsyncSession,
+        agent_id: Optional[str],
+        message: str,
+        draft_spec: Optional[AgentSpec] = None
+    ) -> AgentTestResponse:
         message_trimmed = message.strip()
         if not message_trimmed:
             raise ValueError("Pesan chat tidak boleh kosong.")
-        db_agent = await AgentService.get_agent_by_id(db, agent_id)
-        if not db_agent:
+
+        db_agent = None
+        if agent_id and agent_id != "draft" and not str(agent_id).startswith("draft_"):
+            db_agent = await AgentService.get_agent_by_id(db, agent_id)
+
+        if not db_agent and draft_spec:
+            db_agent = AgentSpecModel(
+                id=draft_spec.id or agent_id or "draft",
+                name=draft_spec.name or "Draf Agent",
+                description=draft_spec.description or "",
+                instructions=draft_spec.instructions or "",
+                model=draft_spec.model or (settings.LLM_MODEL or "z-ai/glm-5.3"),
+                tools=draft_spec.tools or [],
+                mcp_servers=draft_spec.mcp_servers or [],
+                harness=draft_spec.harness or "default-safe-v1",
+                status="draft"
+            )
+        elif not db_agent:
             raise ValueError(f"Agent dengan ID '{agent_id}' tidak ditemukan di database.")
+
+        test_session_id = db_agent.id or "draft"
 
         client, model = AgentService._client_and_model(db_agent)
         selected_tools = ", ".join(db_agent.tools or []) or "tidak ada"
@@ -285,7 +308,7 @@ class AgentService:
 
         if matched_sensitive:
             # Setup working memory conversation
-            conv_title = f"test_session_{agent_id}"
+            conv_title = f"test_session_{test_session_id}"
             conv_res = await db.execute(
                 select(ConversationModel)
                 .where(ConversationModel.title == conv_title)
@@ -293,7 +316,7 @@ class AgentService:
             )
             conversation = conv_res.scalars().first()
             if not conversation:
-                conversation = ConversationModel(user_id=agent_id, title=conv_title)
+                conversation = ConversationModel(user_id=test_session_id, title=conv_title)
                 db.add(conversation)
                 await db.flush()
 
@@ -344,7 +367,7 @@ class AgentService:
         # ======================================================================
         # LEVEL 1: WORKING MEMORY & DATABASE PERSISTENCE
         # ======================================================================
-        conv_title = f"test_session_{agent_id}"
+        conv_title = f"test_session_{test_session_id}"
         conv_res = await db.execute(
             select(ConversationModel)
             .where(ConversationModel.title == conv_title)
@@ -352,7 +375,7 @@ class AgentService:
         )
         conversation = conv_res.scalars().first()
         if not conversation:
-            conversation = ConversationModel(user_id=agent_id, title=conv_title)
+            conversation = ConversationModel(user_id=test_session_id, title=conv_title)
             db.add(conversation)
             await db.flush()
 
@@ -495,10 +518,15 @@ class AgentService:
                         if exec_res.get("ok"):
                             tool_result = exec_res.get("data", exec_res)
                             if isinstance(tool_result, dict):
-                                tool_result["_endpoint"] = t_spec_obj.implementation.get("url")
+                                tool_result["_endpoint"] = exec_res.get("_endpoint") or t_spec_obj.implementation.get("url")
                                 tool_result["_source"] = "Declarative HTTP Executor (Core Engine)"
                         else:
-                            tool_result = {"status": "error", "message": f"Eksekusi HTTP tool gagal: {exec_res.get('error')}"}
+                            endpoint_err_url = exec_res.get("_endpoint") or t_spec_obj.implementation.get("url")
+                            tool_result = {
+                                "status": "error",
+                                "message": f"Eksekusi HTTP tool gagal: {exec_res.get('error')}",
+                                "_endpoint": endpoint_err_url
+                            }
                     else:
                         # Fallback ke built-in / live API registry
                         tool_exec = await ToolRegistryService.execute_tool(db, fn_name, fn_args)

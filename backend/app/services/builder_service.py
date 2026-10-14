@@ -1,11 +1,14 @@
 import json
+import os
 import re
 import uuid
 from typing import Any, List, Optional
+from urllib.parse import urlparse
 
 from openai import AsyncOpenAI
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
 from app.core.builder_engine import (
@@ -19,6 +22,7 @@ from app.core.builder_engine import (
 )
 from app.models.agent import AgentSpecModel
 from app.models.tool import ToolModel
+from app.models.mcp import MCPServerModel
 from app.schemas.agent import AgentSpec, AgentSpecResponse, BuilderChatResponse
 
 
@@ -151,6 +155,75 @@ class BuilderService:
         if not prompt_trimmed:
             raise ValueError("Prompt tidak boleh kosong.")
 
+        # Deteksi otomatis apakah pengguna memberikan URL / endpoint baru dalam percakapan
+        found_urls = re.findall(r"https?://[^\s'\"<>]+", prompt_trimmed)
+        if found_urls:
+            raw_url = found_urls[0].rstrip("/")
+            parsed_u = urlparse(raw_url)
+            new_base_url = f"{parsed_u.scheme}://{parsed_u.netloc}"
+            
+            # 1. Update in-memory settings langsung
+            settings.EXTERNAL_MOCK_API_URL = new_base_url
+            
+            # 2. Update file .env di disk secara aman agar tidak tertinggal
+            try:
+                env_paths = [".env", "backend/.env", "../backend/.env"]
+                for ep in env_paths:
+                    if os.path.exists(ep):
+                        with open(ep, "r", encoding="utf-8") as f_env:
+                            env_content = f_env.read()
+                        if "EXTERNAL_MOCK_API_URL=" in env_content:
+                            new_env_content = re.sub(
+                                r"EXTERNAL_MOCK_API_URL=[^\r\n]*",
+                                f"EXTERNAL_MOCK_API_URL={new_base_url}",
+                                env_content
+                            )
+                            with open(ep, "w", encoding="utf-8") as f_env:
+                                f_env.write(new_env_content)
+            except Exception as e_env:
+                print(f"[Warning] Gagal update .env: {e_env}")
+
+            # 3. Update semua tools HTTP di database agar mengarah ke base URL baru
+            try:
+                tools_to_update = await db.execute(
+                    select(ToolModel).where(
+                        or_(
+                            ToolModel.source_type == "http",
+                            ToolModel.implementation.isnot(None)
+                        )
+                    )
+                )
+                for t in tools_to_update.scalars().all():
+                    if t.implementation and isinstance(t.implementation, dict):
+                        old_url = t.implementation.get("url", "")
+                        old_parsed = urlparse(old_url)
+                        if old_parsed.netloc:
+                            updated_url = f"{new_base_url}{old_parsed.path}"
+                            if old_parsed.query:
+                                updated_url += f"?{old_parsed.query}"
+                            new_impl = dict(t.implementation)
+                            new_impl["url"] = updated_url
+                            t.implementation = new_impl
+                            flag_modified(t, "implementation")
+                    elif t.source_type == "http":
+                        endpoint_path = f"/api/v1/{t.name.replace('_', '-')}"
+                        t.implementation = {
+                            "type": "http",
+                            "url": f"{new_base_url}{endpoint_path}",
+                            "method": "GET"
+                        }
+                        flag_modified(t, "implementation")
+                
+                # 4. Update mcp_servers jika ada yang menunjuk ke URL mock/trycloudflare lama
+                mcp_to_update = await db.execute(select(MCPServerModel))
+                for m in mcp_to_update.scalars().all():
+                    if m.url and ("trycloudflare.com" in m.url or "mock" in m.url):
+                        m.url = f"{new_base_url}/"
+                
+                await db.commit()
+            except Exception as e_db:
+                print(f"[Warning] Gagal update tools dengan URL baru: {e_db}")
+
         # Ambil daftar tools yang aktif 100% DINAMIS dari database
         db_tools_result = await db.execute(select(ToolModel).where(ToolModel.is_active == True))
         db_tools = db_tools_result.scalars().all()
@@ -174,55 +247,49 @@ class BuilderService:
             current_spec_json = current_spec.model_dump_json() if current_spec else "Belum ada spesifikasi awal."
             
             system_msg = (
-                "Anda adalah 'Builder Agent & Tool Architect' di Agent Studio, mengacu pada standar resmi SKILL.md (agent-builder-cek-12-poin).\n"
-                "Tugas Anda: Mewawancarai pengguna non-teknis lewat percakapan interaktif, mengekstrak 12 Poin Kelengkapan secara DINAMIS (untuk industri/topik apa pun: toko online, helpdesk, HRD, klinik, akuntansi, dll), dan merancang spesifikasi agent serta draf tool.\n\n"
-                "ATURAN KERAS (STANDAR SKILL.MD):\n"
-                "1. PLATFORM UNIVERSAL (DINAMIS):\n"
-                "   - Anda BUKAN bot khusus kesehatan/BPJS. Anda melayani pembuatan agent untuk domain apa pun yang diminta pengguna.\n"
-                "   - Dilarang berasumsi atau memaksakan topik kesehatan/BPJS jika pengguna tidak memintanya.\n\n"
-                "2. TEKNIK WAWANCARA (ECHO-BACK & MAKSIMAL 2 PERTANYAAN):\n"
-                "   - Di awal respon 'message', lakukan echo-back singkat: rangkum poin yang sudah dipahami dari jawaban pengguna.\n"
-                "   - Ajukan MAKSIMAL 1–2 pertanyaan per giliran untuk menggali poin yang masih kosong.\n"
-                "   - Urutan prioritas pertanyaan (utamakan yang paling menentukan): C4 (Tindakan boleh/mutasi data) -> C3 (Sumber data/API) -> C5 (Larangan/batas topik) -> C1 (Tujuan utama) -> C6 (Jika data kosong/gagal) -> C12 (Dokumen acuan) -> C8 (Batas pemakaian) -> C9 (Data sensitif) -> C7 (Gaya jawaban) -> C10 (Serah ke manusia) -> C2 (Target pengguna) -> C11 (Contoh percakapan benar).\n"
-                "   - Jika pengguna berkata 'langsung bangun saja' atau 'terserah', tolak dengan sopan dan jelaskan bahwa poin krusial (seperti izin aksi mutasi data atau sumber API) tetap membutuhkan konfirmasinya.\n\n"
-                "3. PERANCANGAN TOOL (KATALOG VS TOOL FACTORY):\n"
-                "   A. KATALOG TERSEDIA:\n"
-                f"      Tool aktif saat ini:\n{tools_info}\n"
-                "      Jika kebutuhan pengguna cocok dengan tool di atas, masukkan namanya ke 'spec.tools'.\n"
-                "   B. TOOL FACTORY (JIKA PENGGUNA MEMBERIKAN API / ENDPOINT / SISTEM BARU):\n"
-                "      Jika pengguna menyebutkan URL API, endpoint web (contoh: https://.../api/..., method GET/POST), rancang tool baru di array 'new_tools':\n"
-                "      - name: nama tool (snake_case, contoh: check_order_status, book_slot)\n"
-                "      - description: penjelasan kapan tool ini dipanggil oleh model AI (minimal 40 karakter)\n"
-                "      - input_schema: format JSON Schema lengkap (properties, type, required)\n"
-                "      - implementation: konfigurasi privat untuk Runner/Executor:\n"
-                "        * type: \"http\"\n"
-                "        * url: URL endpoint lengkap\n"
-                "        * method: \"GET\" | \"POST\" | \"PUT\" | \"DELETE\"\n"
-                "      - effect: \"read\" (hanya membaca data) atau \"write\" (mengubah/menambah data)\n"
-                "      - status: \"draft\"\n"
-                "      - source_ids: [\"L-001\"]\n\n"
-                "4. ATURAN COMMIT ('should_commit'):\n"
-                "   - Set 'should_commit': true HANYA jika pengguna menyatakan eksplisit setuju menyimpan ('simpan', 'terapkan', 'oke bangun sekarang', 'apply').\n"
-                "   - Selama masih dalam proses tanya jawab atau klarifikasi, selalu set 'should_commit': false.\n\n"
+                "Anda adalah 'AI Agent Architect & Co-Pilot' di Agent Studio (seperti GPT Builder di OpenAI atau Coze).\n"
+                "Tugas Anda: Membantu pengguna merancang, menyempurnakan, dan menguji agent AI secara interaktif, kolaboratif, dan proaktif.\n\n"
+                "PRINSIP UTAMA:\n"
+                "1. GENERATIF & SIAP UJI DI TURN 1 (TURN-1 READY):\n"
+                "   - Begitu pengguna menyampaikan ide atau kebutuhan pertama kali, LANGSUNG buatkan draf agent yang lengkap dan berfungsi di blok 'spec' (nama, deskripsi, instruksi SOP lengkap, dan tools relevan).\n"
+                "   - Dilarang keras menolak membuat agent atau menunda pembuatan dengan interogasi panjang.\n\n"
+                "2. PROAKTIF & INTERAKTIF SECARA DINAMIS (BUKAN TEMPLATE):\n"
+                "   - Di bidang 'message', sampaikan respons ramah dan cerdas dengan 3 elemen:\n"
+                "     a. Konfirmasi ringkas: jelaskan apa yang baru saja dirancang/disesuaikan.\n"
+                "     b. Ajak uji coba langsung: beri tahu pengguna bahwa draf agent sudah aktif dan siap dicoba di panel uji sebelah kanan (Test Chat).\n"
+                "     c. Saran proaktif kontekstual: berikan 1-2 ide atau pertanyaan spesifik yang sangat relevan dengan industri/domain agent tersebut (contoh: untuk toko online, sarankan aturan retur barang atau jam operasional; untuk helpdesk IT, sarankan eskalasi tiket kritis; untuk asisten riset, sarankan format sitasi).\n"
+                "     HINDARI pertanyaan generik yang membosankan seperti 'mau tambahkan hal ini lagi?'. Selalu sebutkan fitur/aspek nyata yang spesifik untuk domain tersebut!\n\n"
+                "3. PERBAIKAN INKREMENTAL (ANTI-AMNESIA):\n"
+                "   - Jika pengguna meminta revisi pada draf yang sudah ada ('current_spec'), JANGAN menghapus aturan atau instruksi yang sudah dibuat sebelumnya!\n"
+                "   - Lakukan patch/penyempurnaan secara cerdas: pertahankan nama, konteks domain, SOP, dan tools yang sudah ada, lalu perbarui hanya bagian yang diminta (misal: gaya bicara lebih santai, tambahan larangan tertentu, format respons).\n\n"
+                "4. PEMILIHAN & PERANCANGAN TOOL:\n"
+                "   A. Tool Katalog Database:\n"
+                f"      Daftar tool aktif saat ini:\n{tools_info}\n"
+                "      Pilih nama tool yang cocok dan masukkan ke 'spec.tools'.\n"
+                "   B. Tool Factory (Endpoint Baru):\n"
+                "      Jika pengguna memberikan URL / endpoint API (contoh: https://.../api/...), buatkan draf tool baru di array 'new_tools' (name, description, input_schema, implementation: {type: 'http', url: '...', method: 'GET'|'POST'}, effect, status: 'draft').\n\n"
+                "5. ATURAN COMMIT ('should_commit'):\n"
+                "   - Set 'should_commit': true HANYA jika pengguna secara eksplisit meminta menyimpan ('simpan', 'terapkan ke database', 'save', 'commit').\n"
+                "   - Jika masih eksplorasi, tanya jawab, atau revisi, set 'should_commit': false.\n\n"
                 "FORMAT BALASAN (Wajib JSON valid di dalam blok ```json ... ```):\n"
                 "{\n"
-                '  "message": "Kalimat percakapan ramah (echo-back rangkuman singkat + maks 2 pertanyaan terarah berikutnya)",\n'
+                '  "message": "Kalimat percakapan ramah & proaktif: konfirmasi pembuatan + ajakan tes di panel kanan + saran spesifik dinamis sesuai domain",\n'
                 '  "spec_updated": true,\n'
                 '  "should_commit": false,\n'
                 '  "spec": {\n'
                 '    "name": "Nama Agent",\n'
-                '    "description": "Tugas utama agent (C1)",\n'
-                '    "instructions": "System prompt lengkap (Peran, SOP, Gaya Bahasa C7, Fallback C6, Batasan C5)",\n'
+                '    "description": "Tugas utama agent",\n'
+                '    "instructions": "System prompt lengkap (Peran, SOP, Gaya Bicara, Fallback saat data kosong, Batasan Keamanan)",\n'
                 '    "tools": ["nama_tool"]\n'
                 '  },\n'
                 '  "new_tools": [],\n'
                 '  "coverage": {\n'
                 '    "C1": "terisi",\n'
-                '    "C2": "kosong",\n'
+                '    "C2": "terisi",\n'
                 '    "C3": "kosong",\n'
                 '    "C4": "kosong",\n'
-                '    "C5": "kosong",\n'
-                '    "C6": "kosong",\n'
+                '    "C5": "terisi",\n'
+                '    "C6": "terisi",\n'
                 '    "C7": "terisi",\n'
                 '    "C8": "kosong",\n'
                 '    "C9": "kosong",\n'
@@ -331,7 +398,7 @@ class BuilderService:
                         "satisfied": satisfied_count,
                         "total": 12,
                         "percent": cov_percent,
-                        "can_build": satisfied_count >= 12,
+                        "can_build": True,
                         "items": cov_items
                     }
 
@@ -461,17 +528,16 @@ class BuilderService:
             tool_rules = "\n".join([f"- Gunakan '{t}' sesuai kebutuhan alur pemeriksaan/layanan." for t in tools]) if tools else "- Gunakan tool yang tersedia untuk membantu pengguna."
             
             instructions = (
-                f"PERAN: Kamu adalah '{name}', asisten virtual profesional yang memandu pengguna secara ramah, empatik, dan terstruktur.\n\n"
+                f"PERAN: Kamu adalah '{name}', asisten virtual profesional yang memandu pengguna secara ramah, solutif, dan terstruktur.\n\n"
                 f"TUJUAN UTAMA:\n"
                 f"{clean_goal}\n\n"
                 f"SOP & ALUR KERJA:\n"
-                f"1. Sambut pengguna dengan ramah, pahami keluhan atau kebutuhan yang disampaikan.\n"
-                f"2. Manfaatkan tools yang tersedia secara bertahap dan akurat berdasarkan data faskes/layanan resmi.\n"
-                f"3. Berikan rangkuman hasil dan panduan langkah selanjutnya yang jelas di setiap akhir pesan.\n\n"
-                f"BATASAN KEAMANAN:\n"
-                f"- Kamu BUKAN dokter; jangan memberikan diagnosis medis pasti atau meresepkan obat.\n"
-                f"- Untuk kondisi darurat medis, selalu prioritaskan arahan ke IGD terdekat tanpa menunda.\n"
-                f"- Dilarang mengarang informasi. Sampaikan apa adanya jika data tidak ditemukan.\n\n"
+                f"1. Sambut pengguna dengan ramah, dengarkan dan pahami kebutuhan atau pertanyaan yang disampaikan.\n"
+                f"2. Gunakan tools yang tersedia secara bertahap dan akurat untuk memverifikasi atau mengambil data pendukung.\n"
+                f"3. Berikan jawaban yang jelas, to the point, dan panduan langkah selanjutnya yang solutif.\n\n"
+                f"BATASAN KEAMANAN & ETIKA:\n"
+                f"- Jaga kerahasiaan data privasi dan etika interaksi profesional.\n"
+                f"- Dilarang mengarang informasi fiktif. Jika data tidak tersedia atau layanan sistem sedang offline, sampaikan dengan jujur.\n\n"
                 f"ATURAN PENGGUNAAN TOOL:\n"
                 f"{tool_rules}"
             )
@@ -497,7 +563,7 @@ class BuilderService:
                 status="draft"
             )
             return BuilderChatResponse(
-                message=f"Draf arsitektur awal untuk **{name}** telah disiapkan dengan kapabilitas yang sesuai.",
+                message=f"Draf awal untuk **{name}** telah siap! Anda bisa langsung mencobanya di panel uji (Test Chat) di sebelah kanan. Apakah ingin menambahkan aturan khusus, gaya bahasa tertentu, atau mengintegrasikan tool baru?",
                 spec=draft_spec,
                 is_draft=True
             )

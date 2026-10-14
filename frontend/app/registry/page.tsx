@@ -123,7 +123,7 @@ export default function ToolsRegistryPage() {
 
   const handleUpdateTool = async (
     toolId: string,
-    updatedData: { name: string; description: string; apiUrl?: string; input_schema?: any }
+    updatedData: { name: string; description: string; apiUrl?: string; input_schema?: any; implementation?: any }
   ) => {
     const res = await fetch(`${API_URL}/tools/${toolId}`, {
       method: "PUT",
@@ -314,7 +314,6 @@ export default function ToolsRegistryPage() {
                       <th className="py-3 px-6 min-w-[200px]">TOOL</th>
                       <th className="py-3 px-6 min-w-[120px]">SOURCE</th>
                       <th className="py-3 px-6 min-w-[120px]">AUTH</th>
-                      <th className="py-3 px-6 min-w-[120px]">HEALTH</th>
                       <th className="py-3 px-6 min-w-[120px]">USED BY</th>
                       <th className="py-3 px-6 min-w-[100px] text-right">ACTIONS</th>
                     </tr>
@@ -322,7 +321,7 @@ export default function ToolsRegistryPage() {
                   <tbody className="divide-y divide-slate-100 text-xs">
                     {isLoading ? (
                       <tr>
-                        <td colSpan={6} className="py-12 text-center text-slate-400">
+                        <td colSpan={5} className="py-12 text-center text-slate-400">
                           <div className="flex items-center justify-center gap-2">
                             <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                             <span>Loading tools...</span>
@@ -331,7 +330,7 @@ export default function ToolsRegistryPage() {
                       </tr>
                     ) : tools.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="py-16 text-center">
+                        <td colSpan={5} className="py-16 text-center">
                           <div className="flex flex-col items-center justify-center text-slate-400">
                             <Wrench className="w-8 h-8 mb-2 text-slate-300" />
                             <p className="text-xs font-semibold text-slate-600">
@@ -353,6 +352,11 @@ export default function ToolsRegistryPage() {
                                 {tool.description}
                               </div>
                             )}
+                            {tool.implementation?.url && (
+                              <div className="text-[10px] font-mono text-blue-600 truncate mt-0.5 max-w-[340px]">
+                                {tool.implementation.method || "GET"} {tool.implementation.url}
+                              </div>
+                            )}
                           </td>
                           <td className="py-3.5 px-6">
                             <span
@@ -369,24 +373,6 @@ export default function ToolsRegistryPage() {
                           </td>
                           <td className="py-3.5 px-6 text-slate-500 font-mono text-[11px]">
                             {tool.auth_custody || tool.auth || "none"}
-                          </td>
-                          <td className="py-3.5 px-6">
-                            <span
-                              className={`inline-flex items-center gap-1.5 font-medium text-xs ${
-                                (tool.health_status || tool.health) === "ok"
-                                  ? "text-emerald-600"
-                                  : "text-amber-600"
-                              }`}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${
-                                  (tool.health_status || tool.health) === "ok"
-                                    ? "bg-emerald-500"
-                                    : "bg-amber-500"
-                                }`}
-                              />
-                              {tool.health_status || tool.health || "ok"}
-                            </span>
                           </td>
                           <td className="py-3.5 px-6 text-slate-500 text-xs">
                             {tool.used_by || tool.usedBy || "0 agents"}

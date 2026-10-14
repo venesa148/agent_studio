@@ -380,6 +380,22 @@ export function BuildAgentChatPane({
         if (typeof window !== "undefined" && !window.location.search.includes("id=")) {
           window.history.replaceState({}, '', `/?draft_id=${savedDraft.id}`);
         }
+
+        // Emit draft spec ke parent dan panel uji coba (TestAgentPane) secara real-time
+        if (data.spec) {
+          const draftForTesting: AgentSpecData = {
+            id: currentDraftIdRef.current,
+            name: data.spec.name || "Draf Agen Baru",
+            description: data.spec.description || "",
+            instructions: data.spec.instructions || "",
+            model: data.spec.model || "z-ai/glm-5.3",
+            tools: data.spec.tools || [],
+            mcp_servers: data.spec.mcp_servers || [],
+            harness: data.spec.harness || "default-safe-v1",
+            status: "draft",
+          };
+          onAgentCreated?.(draftForTesting);
+        }
       }
 
       // HANYA update activeAgent jika sudah committed / bukan draft
@@ -459,6 +475,17 @@ export function BuildAgentChatPane({
             messages: updated,
           });
           setActiveDraft(updatedDraft);
+          onAgentCreated?.({
+            id: currentDraftIdRef.current,
+            name: lastSpec.name || "Draf Agen",
+            description: lastSpec.description,
+            instructions: lastSpec.instructions,
+            model: lastSpec.model || "z-ai/glm-5.3",
+            tools: lastSpec.tools || [],
+            mcp_servers: lastSpec.mcp_servers || [],
+            harness: lastSpec.harness || "default-safe-v1",
+            status: "draft",
+          });
         }
       }
 
@@ -723,13 +750,13 @@ export function BuildAgentChatPane({
                         <span className="text-[11px] font-bold text-indigo-700">
                           {msg.coverage.satisfied}/12 Poin ({msg.coverage.percent}%)
                         </span>
-                        {msg.coverage.can_build ? (
+                        {msg.coverage.satisfied >= 12 ? (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                            ✓ Lengkap
+                            ✓ 12 Poin Lengkap
                           </span>
                         ) : (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
-                            ⏳ Wawancara
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+                            ⚡ Siap Diuji Coba
                           </span>
                         )}
                       </div>

@@ -82,7 +82,12 @@ async def agent_chat_test(payload: AgentTestRequest, db: AsyncSession = Depends(
     Menerima agent_id + message, mengambil Agent dari database, dan memproses respons deterministik.
     """
     try:
-        return await AgentService.test_agent(db, payload.agent_id, payload.message)
+        return await AgentService.test_agent(
+            db=db,
+            agent_id=payload.agent_id,
+            message=payload.message,
+            draft_spec=payload.draft_spec
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except RuntimeError as e:

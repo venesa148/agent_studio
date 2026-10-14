@@ -77,14 +77,16 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None  # redirect = host lain = bisa lolos allowlist, jadi ditolak
 
 
-def default_transport(method, url, headers, timeout):
-    req = urllib.request.Request(url, method=method, headers=headers)
+def default_transport(method, url, headers, timeout, data=None):
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     opener = urllib.request.build_opener(_NoRedirect)
     try:
         with opener.open(req, timeout=timeout) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
+    except Exception as e:
+        return 503, json.dumps({"error": f"Layanan target tidak dapat dijangkau: {str(e)}"}).encode()
 
 
 def execute_http(spec: dict, args: dict, vault: dict, allowed_hosts: list[str],
@@ -93,12 +95,18 @@ def execute_http(spec: dict, args: dict, vault: dict, allowed_hosts: list[str],
     missing = [r for r in spec["input_schema"].get("required", []) if r not in args]
     if missing:
         return {"error": "missing_args", "args": missing}
+    
+    used_keys = set()
+    for m in PLACEHOLDER_RE.finditer(impl["url"]):
+        used_keys.add(m.group(1))
     url = PLACEHOLDER_RE.sub(lambda m: quote(str(args[m.group(1)]), safe=""), impl["url"])
+    
     try:
         kw = {"resolve": resolve} if resolve else {}
         check_url(url, allowed_hosts, **kw)
     except Blocked as e:
         return {"error": f"egress_blocked:{e}"}
+        
     headers = {"Accept": "application/json"}
     secret_value = None
     auth = impl.get("auth")
@@ -107,7 +115,24 @@ def execute_http(spec: dict, args: dict, vault: dict, allowed_hosts: list[str],
         if secret_value is None:
             return {"error": "secret_missing", "secret": auth["secret"]}  # hanya nama yang disebut
         headers[auth["name"]] = secret_value
-    status, body = transport(impl["method"], url, headers, impl.get("timeout_ms", 8000) / 1000)
+        
+    data = None
+    method = (impl.get("method") or "GET").upper()
+    if method in ("GET", "HEAD"):
+        remaining_args = {k: v for k, v in args.items() if k not in used_keys and v is not None}
+        if remaining_args:
+            from urllib.parse import urlencode
+            delimiter = "&" if "?" in url else "?"
+            url = f"{url}{delimiter}{urlencode(remaining_args)}"
+    else:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(args).encode("utf-8")
+        
+    try:
+        status, body = transport(method, url, headers, impl.get("timeout_ms", 8000) / 1000, data=data)
+    except TypeError:
+        status, body = transport(method, url, headers, impl.get("timeout_ms", 8000) / 1000)
+        
     if status >= 400:
         return {"error": f"http_{status}"}
     body = body[: impl.get("response", {}).get("max_bytes", 20000)]
@@ -115,10 +140,10 @@ def execute_http(spec: dict, args: dict, vault: dict, allowed_hosts: list[str],
     if secret_value and secret_value in text:
         text = text.replace(secret_value, "[REDACTED]")
     try:
-        data = json.loads(text)
+        res_data = json.loads(text)
     except ValueError:
         return {"error": "bad_json"}
     select = impl.get("response", {}).get("select")
-    if select and isinstance(data, dict):
-        data = {k: data.get(k) for k in select}
-    return {"ok": True, "data": data}
+    if select and isinstance(res_data, dict):
+        res_data = {k: res_data.get(k) for k in select}
+    return {"ok": True, "data": res_data}

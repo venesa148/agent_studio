@@ -115,19 +115,29 @@ function HomePageContent() {
   }, [agentId, draftId, isNewQuery, agents]);
 
   const handleAgentCreatedOrUpdated = (agent: AgentSpecData) => {
-    setAgents((prev) => {
-      const idx = prev.findIndex((a) => a.id === agent.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = agent;
-        return copy;
+    const isPersisted = Boolean(agent.id && !agent.id.startsWith("draft_") && agent.status !== "draft");
+    if (isPersisted) {
+      setAgents((prev) => {
+        const idx = prev.findIndex((a) => a.id === agent.id);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = agent;
+          return copy;
+        }
+        return [agent, ...prev];
+      });
+      if (typeof window !== "undefined") {
+        window.history.pushState({}, "", `/?id=${agent.id}`);
       }
-      return [agent, ...prev];
-    });
-    setActiveAgent(agent);
-    if (typeof window !== "undefined") {
-      window.history.pushState({}, "", `/?id=${agent.id}`);
+    } else {
+      if (!agent.id) {
+        agent.id = `draft_${Date.now()}`;
+      }
+      if (typeof window !== "undefined" && !window.location.search.includes("id=")) {
+        window.history.replaceState({}, "", `/?draft_id=${agent.id}`);
+      }
     }
+    setActiveAgent({ ...agent });
   };
 
   const handleClearActiveAgent = () => {

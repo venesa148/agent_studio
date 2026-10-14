@@ -583,8 +583,8 @@ guardrails:
     if (e) e.preventDefault();
     if (!input.trim() || isRunning) return;
 
-    if (!activeAgent || !activeAgent.id) {
-      setErrorMessage("Belum ada Agent yang dipilih/dibuat. Silakan buat Agent terlebih dahulu via chat utama.");
+    if (!activeAgent) {
+      setErrorMessage("Belum ada Agent yang dipilih atau dirancang. Silakan buat Agent terlebih dahulu via chat builder.");
       return;
     }
 
@@ -605,15 +605,21 @@ guardrails:
     const chatTimeoutId = setTimeout(() => chatController.abort(), 180000); // 180 detik (3 menit) timeout untuk mengakomodasi multi-tool LLM loop
 
     try {
+      const isDraft = !activeAgent.id || activeAgent.id.startsWith("draft") || activeAgent.status === "draft";
+      const payload: any = {
+        agent_id: activeAgent.id || "draft",
+        message: userText,
+      };
+      if (isDraft) {
+        payload.draft_spec = activeAgent;
+      }
+
       const res = await fetch(`${apiUrl}/api/v1/agent/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          agent_id: activeAgent.id,
-          message: userText,
-        }),
+        body: JSON.stringify(payload),
         signal: chatController.signal,
       });
       clearTimeout(chatTimeoutId);
@@ -720,7 +726,7 @@ guardrails:
             <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
               Testing Agent Active
             </div>
-            {agents.length > 0 ? (
+            {agents.length > 0 || activeAgent ? (
               <div className="relative inline-block w-full">
                 <select
                   value={activeAgent?.id || ""}
@@ -738,7 +744,7 @@ guardrails:
                   )}
                   {activeAgent && !agents.some((a) => a.id === activeAgent.id) && (
                     <option value={activeAgent.id}>
-                      ⚡ [Draf] {activeAgent.name}
+                      ⚡ [Draf Aktif] {activeAgent.name}
                     </option>
                   )}
                   {agents.map((agent) => (
@@ -759,14 +765,14 @@ guardrails:
         {activeAgent && (
           <span
             className={`text-[10px] px-2 py-0.5 rounded-full font-bold border shrink-0 ${
-              activeAgent.id?.startsWith("draft_") || activeAgent.status === "draft"
-                ? "bg-amber-50 text-amber-700 border-amber-200"
+              !activeAgent.id || activeAgent.id.startsWith("draft_") || activeAgent.status === "draft"
+                ? "bg-blue-50 text-blue-700 border-blue-200 animate-pulse"
                 : "bg-emerald-50 text-emerald-700 border-emerald-200"
             }`}
           >
-            {activeAgent.id?.startsWith("draft_") || activeAgent.status === "draft"
-              ? "DRAF"
-              : "ONLINE"}
+            {!activeAgent.id || activeAgent.id.startsWith("draft_") || activeAgent.status === "draft"
+              ? "⚡ DRAF SIAP UJI"
+              : "🟢 ONLINE"}
           </span>
         )}
       </div>

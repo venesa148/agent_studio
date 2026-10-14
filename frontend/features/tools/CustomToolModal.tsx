@@ -296,7 +296,7 @@ export function CustomToolModal({
                     {testStatus === "success" && (
                       <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
                         <CheckCircle2 className="w-3 h-3" />
-                        Health: OK
+                        Tested
                       </span>
                     )}
                   </h4>
@@ -347,8 +347,8 @@ export function CustomToolModal({
               {testOutput && (
                 <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-[11px] space-y-1">
                   <div className="flex items-center justify-between text-slate-400 text-[10px] pb-1 border-b border-slate-800">
-                    <span>Response Output (200 OK)</span>
-                    <span className="text-emerald-400">Health: ok</span>
+                    <span>Response Output</span>
+                    <span className="text-emerald-400 font-mono">200 OK</span>
                   </div>
                   <pre className="overflow-x-auto pt-1">
                     {JSON.stringify(testOutput, null, 2)}

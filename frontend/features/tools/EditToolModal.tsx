@@ -9,7 +9,7 @@ interface EditToolModalProps {
   onClose: () => void;
   onSaveTool: (
     toolId: string,
-    updatedData: { name: string; description: string; apiUrl?: string; input_schema?: any }
+    updatedData: { name: string; description: string; apiUrl?: string; input_schema?: any; implementation?: any }
   ) => Promise<void>;
 }
 
@@ -30,6 +30,7 @@ export function EditToolModal({
       setName(tool.name || "");
       setDescription(tool.description || "");
       const existingUrl =
+        tool.implementation?.url ||
         tool.input_schema?.["x-api-config"]?.base_url ||
         tool.input_schema?.["x-openapi"]?.server_url ||
         tool.input_schema?.base_url ||
@@ -52,7 +53,10 @@ export function EditToolModal({
     setErrorMsg(null);
     try {
       const updatedSchema = { ...(tool.input_schema || {}) };
+      let updatedImpl = tool.implementation ? { ...tool.implementation } : { type: "http", method: "GET" };
+
       if (apiUrl.trim()) {
+        updatedImpl.url = apiUrl.trim();
         if (!updatedSchema["x-api-config"]) {
           updatedSchema["x-api-config"] = {};
         }
@@ -66,6 +70,7 @@ export function EditToolModal({
         description: description.trim(),
         apiUrl: apiUrl.trim() || undefined,
         input_schema: updatedSchema,
+        implementation: apiUrl.trim() ? updatedImpl : tool.implementation,
       });
       onClose();
     } catch (err: any) {

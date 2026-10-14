@@ -23,6 +23,9 @@ class ToolUpdateRequest(BaseModel):
     health_status: Optional[str] = None
     used_by: Optional[str] = None
     mcp_server_id: Optional[str] = None
+    implementation: Optional[Dict[str, Any]] = None
+    status: Optional[str] = None
+    effect: Optional[str] = None
 
 class ToolResponse(BaseModel):
     id: str
