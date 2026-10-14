@@ -48,28 +48,44 @@ class BuilderService:
                 return name
 
         lowered = cleaned.lower()
-        prefixes = (
-            "ubah nama agent menjadi ", "ubah nama agen menjadi ", "ubah nama menjadi ",
-            "ganti nama agent menjadi ", "ganti nama agen menjadi ", "ganti nama menjadi ",
-            "rename agent to ", "rename to ",
-            "buatkan aku agent asisten ", "buatkan saya agent asisten ", "buatkan agent asisten ",
-            "buatkan aku agent ", "buatkan saya agent ", "buatkan agent ",
-            "buat agent asisten ", "buat agent ", "create an agent ", "create agent ",
-            "buatkan asisten ", "buatkan ", "buat ", "create "
+
+        # 2. Token-based check: jika prompt hanya berisi salam, kata ganti, kata bantu, dan niat membuat AI tanpa domain spesifik
+        intent_and_filler_words = {
+            "halo", "hai", "hi", "hei", "hey", "hallo", "selamat", "pagi", "siang", "sore", "malam",
+            "saya", "aku", "kami", "kita", "gue", "gw",
+            "ingin", "mau", "pengen", "hendak", "akan",
+            "membuat", "buat", "buatkan", "bikin", "bikinin", "ciptakan", "create", "build", "make",
+            "tolong", "bantu", "bisa", "coba", "mohon", "tolonglah",
+            "ai", "agent", "agen", "bot", "asisten", "assistant",
+            "dong", "deh", "ya", "yah", "nih", "lah", "kan", "pun", "saja", "aja", "sebuah", "suatu", "satu", "dulu"
+        }
+        words = re.findall(r"[a-zA-Z0-9]+", lowered)
+        non_filler = [w for w in words if w not in intent_and_filler_words]
+        if not non_filler:
+            return "Asisten AI Serbaguna"
+
+        # 3. Bersihkan prefix instruksi umum jika ada domain substantif di belakangnya
+        clean_regex = (
+            r"^(?:halo|hai|hi|hei|selamat\s+(?:pagi|siang|sore|malam))?[,\s]*"
+            r"(?:saya|aku|kami)?\s*(?:ingin|mau|pengen|coba)?\s*(?:halo|hai)?[,\s]*"
+            r"(?:tolong\s+)?(?:buatkan|membuat|bikin|buat|ciptakan|create)\s+"
+            r"(?:aku\s+|saya\s+)?(?:agent\s+|agen\s+|ai\s+|bot\s+|asisten\s+)?"
+            r"(?:asisten\s+)?"
         )
-        for prefix in prefixes:
-            if lowered.startswith(prefix):
-                cleaned = cleaned[len(prefix):].strip()
-                break
+        cleaned = re.sub(clean_regex, "", cleaned, flags=re.IGNORECASE).strip()
 
         # Potong jika masih ada klausul penjelas seperti "untuk...", "guna..."
         split_match = re.split(r"\s+(?:untuk|yang|guna|agar|sebagai)\s+", cleaned, flags=re.IGNORECASE)
         if split_match and len(split_match[0].strip()) > 0:
             cleaned = split_match[0].strip()
 
-        if not cleaned:
-            return "Custom AI Assistant"
-        name = cleaned[:60].title()
+        if not cleaned or cleaned.lower() in ("ai", "agent", "agen", "bot", "asisten", "asisten ai"):
+            return "Asisten AI Serbaguna"
+
+        name = cleaned[:50].strip().title()
+        if not name.lower().startswith("asisten") and not name.lower().startswith("agent") and not name.lower().startswith("bot"):
+            name = f"Asisten {name}"
+
         for acr in ["AI", "API", "IT", "CS", "HR", "CRM", "ERP", "SOP", "URL", "JSON", "REST", "SQL", "BPJS"]:
             name = re.sub(rf"\b{acr.capitalize()}\b", acr, name)
         return name
@@ -91,12 +107,21 @@ class BuilderService:
         # 1. Coba gunakan LLM jika API Key tersedia untuk seleksi semantik dari database
         client = None
         model = None
-        if settings.OPENAI_API_KEY:
-            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=0)
-            model = settings.OPENAI_DEFAULT_MODEL
-        elif settings.LLM_API_KEY:
-            client = AsyncOpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL, max_retries=0)
-            model = settings.LLM_MODEL
+        api_key = settings.LLM_API_KEY or settings.OPENROUTER_API_KEY or settings.OPENAI_API_KEY
+        if api_key:
+            headers = {}
+            if "openrouter.ai" in (settings.LLM_BASE_URL or ""):
+                headers = {
+                    "HTTP-Referer": "https://agentstudio.ai",
+                    "X-Title": "Agent Studio",
+                }
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=settings.LLM_BASE_URL if ("openrouter.ai" in (settings.LLM_BASE_URL or "") or "googleapis.com" in (settings.LLM_BASE_URL or "")) else None,
+                default_headers=headers,
+                max_retries=1
+            )
+            model = settings.LLM_MODEL or settings.OPENAI_DEFAULT_MODEL or "z-ai/glm-5.3-flash"
 
         if client and model:
             try:
@@ -231,12 +256,21 @@ class BuilderService:
         
         client = None
         model = None
-        if settings.OPENAI_API_KEY:
-            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=0)
-            model = settings.OPENAI_DEFAULT_MODEL
-        elif settings.LLM_API_KEY:
-            client = AsyncOpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL, max_retries=0)
-            model = settings.LLM_MODEL
+        api_key = settings.LLM_API_KEY or settings.OPENROUTER_API_KEY or settings.OPENAI_API_KEY
+        if api_key:
+            headers = {}
+            if "openrouter.ai" in (settings.LLM_BASE_URL or ""):
+                headers = {
+                    "HTTP-Referer": "https://agentstudio.ai",
+                    "X-Title": "Agent Studio",
+                }
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=settings.LLM_BASE_URL if ("openrouter.ai" in (settings.LLM_BASE_URL or "") or "googleapis.com" in (settings.LLM_BASE_URL or "")) else None,
+                default_headers=headers,
+                max_retries=1
+            )
+            model = settings.LLM_MODEL or settings.OPENAI_DEFAULT_MODEL or "z-ai/glm-5.3-flash"
 
         if client and model:
             tools_info_list = []
@@ -271,6 +305,10 @@ class BuilderService:
                 "5. ATURAN COMMIT ('should_commit'):\n"
                 "   - Set 'should_commit': true HANYA jika pengguna secara eksplisit meminta menyimpan ('simpan', 'terapkan ke database', 'save', 'commit').\n"
                 "   - Jika masih eksplorasi, tanya jawab, atau revisi, set 'should_commit': false.\n\n"
+                "6. PERMINTAAN UMUM / SINGKAT (MISAL: 'SAYA INGIN MEMBUAT AI'):\n"
+                "   - Jika pengguna hanya mengetik pernyataan umum atau salam (seperti 'Saya ingin membuat AI' atau 'Halo bantu saya buat bot'):\n"
+                "   - JANGAN beri nama agent 'Saya Ingin Membuat AI'! Berikan nama cerdas seperti 'Asisten AI Serbaguna' atau sesuaikan dengan tool aktif yang ada di katalog.\n"
+                "   - Di respons 'message', sambut hangat dan tanyakan proaktif: 'Draf Asisten AI Serbaguna sudah saya siapkan dan siap diuji di panel kanan. Agen jenis apa yang ingin Anda bangun? Misalnya: (1) CS Toko Online, (2) HR & Cuti Karyawan, atau (3) Asisten Dokumen/Riset? Beri tahu saya agar draf ini bisa langsung saya sesuaikan!'\n\n"
                 "FORMAT BALASAN (Wajib JSON valid di dalam blok ```json ... ```):\n"
                 "{\n"
                 '  "message": "Kalimat percakapan ramah & proaktif: konfirmasi pembuatan + ajakan tes di panel kanan + saran spesifik dinamis sesuai domain",\n'
@@ -318,28 +356,61 @@ class BuilderService:
             messages.append({"role": "user", "content": prompt_trimmed})
             
             try:
+                print(f"[BuilderService] Calling LLM with prompt: {prompt_trimmed!r}")
                 completion = await client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=0.2,
                     max_tokens=2500,
-                    timeout=35.0
+                    timeout=65.0
                 )
-                content = completion.choices[0].message.content or ""
-                match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
-                if not match:
-                    match = re.search(r"({.*})", content, re.DOTALL)
-                    
+                msg_obj = completion.choices[0].message
+                content = msg_obj.content or ""
+                if not content and hasattr(msg_obj, "reasoning") and msg_obj.reasoning:
+                    content = msg_obj.reasoning
+                try:
+                    with open(r"C:\Users\ASUS\Magang\compare\NewCompare\zenit\FE\agent_studio\backend\scratch\last_llm_response.txt", "w", encoding="utf-8") as f:
+                        f.write(content)
+                except Exception as e_w:
+                    pass
+                parsed = None
+                # Coba 1: Blok markdown ```json ... ```
+                match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
                 if match:
-                    raw_json = match.group(1).strip()
                     try:
-                        parsed = json.loads(raw_json, strict=False)
-                    except json.JSONDecodeError:
-                        cleaned_json = re.sub(r'\\(?![/u"bfnrt])', r'\\\\', raw_json)
-                        parsed = json.loads(cleaned_json, strict=False)
+                        parsed = json.loads(match.group(1).strip(), strict=False)
+                    except Exception:
+                        try:
+                            cleaned_json = re.sub(r'\\(?![/u"bfnrt])', r'\\\\', match.group(1).strip())
+                            parsed = json.loads(cleaned_json, strict=False)
+                        except Exception:
+                            pass
+                
+                # Coba 2: Outermost curly braces { ... }
+                if not parsed:
+                    first_brace = content.find("{")
+                    last_brace = content.rfind("}")
+                    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                        candidate = content[first_brace:last_brace + 1].strip()
+                        try:
+                            parsed = json.loads(candidate, strict=False)
+                        except Exception:
+                            try:
+                                cleaned_json = re.sub(r'\\(?![/u"bfnrt])', r'\\\\', candidate)
+                                parsed = json.loads(cleaned_json, strict=False)
+                            except Exception:
+                                pass
+
+                if parsed and isinstance(parsed, dict):
                     message = parsed.get("message", "Saya telah memproses permintaan Anda.")
                     spec_updated = parsed.get("spec_updated", False)
                     should_commit = parsed.get("should_commit", False)
+                    
+                    # Sanitize spec name if LLM echoed raw greeting/intent
+                    if "spec" in parsed and isinstance(parsed["spec"], dict):
+                        llm_name = parsed["spec"].get("name", "")
+                        if not llm_name or llm_name.lower().strip() in ("saya ingin membuat ai", "saya ingin halo membuat ai", "ai", "agent"):
+                            parsed["spec"]["name"] = "Asisten AI Serbaguna"
                     
                     # Tool Factory: Simpan draf tool baru yang dirancang oleh LLM
                     new_tools_raw = parsed.get("new_tools", [])
@@ -465,7 +536,9 @@ class BuilderService:
                         return BuilderChatResponse(message=message, is_draft=True, new_tools=new_tools_raw, coverage=coverage_data)
                         
             except Exception as e:
-                print(f"LLM Builder Error: {e}")
+                import traceback
+                print(f"[BuilderService] LLM Builder Error: {e}")
+                traceback.print_exc()
                 pass
 
         # Fallback Logic (jika LLM offline/timeout/error)
@@ -513,15 +586,18 @@ class BuilderService:
             )
         else:
             name = BuilderService._agent_name(prompt_trimmed)
-            desc_match = re.search(r'(?:untuk|guna|tugasnya|bertugas)\s+(.+)$', prompt_trimmed, re.IGNORECASE)
-            if desc_match:
-                clean_action = desc_match.group(1).strip().rstrip('.!?')
-                description = f"Asisten virtual ({name}) yang bertugas {clean_action}."
-                clean_goal = clean_action
+            if name == "Asisten AI Serbaguna":
+                description = f"Asisten virtual ({name}) yang siap membantu berbagai alur kerja dan otomasi tugas harian Anda."
+                clean_goal = "Membantu pengguna menyelesaikan tugas, menjawab pertanyaan, dan mengoperasikan tools yang tersedia secara akurat."
             else:
-                cleaned_goal = re.sub(r'^(?:buatkan|bikin|buat|create)\s+(?:agent\s+)?(?:asisten\s+)?(?:bernama\s+[^\s]+\s+)?', '', prompt_trimmed, flags=re.IGNORECASE).strip()
-                description = f"Asisten virtual ({name}) untuk {cleaned_goal}."
-                clean_goal = cleaned_goal
+                desc_match = re.search(r'(?:untuk|guna|tugasnya|bertugas)\s+(.+)$', prompt_trimmed, re.IGNORECASE)
+                if desc_match:
+                    clean_action = desc_match.group(1).strip().rstrip('.!?')
+                    description = f"Asisten virtual ({name}) yang bertugas {clean_action}."
+                    clean_goal = clean_action
+                else:
+                    description = f"Asisten virtual ({name}) yang siap membantu kebutuhan operasional dan memandu pengguna secara terstruktur."
+                    clean_goal = f"Memberikan layanan dan panduan terbaik untuk kebutuhan {name}."
 
             tools = await BuilderService._select_tools_from_db(db, prompt_trimmed)
             
@@ -562,8 +638,24 @@ class BuilderService:
                 harness="default-safe-v1",
                 status="draft"
             )
+
+            if name == "Asisten AI Serbaguna":
+                fallback_msg = (
+                    f"Draf awal untuk **{name}** telah siap dan bisa langsung Anda uji di panel Test Chat sebelah kanan! "
+                    "Agen spesifik apa yang ingin Anda rancang? Misalnya: "
+                    "(1) CS Toko Online (dengan aturan retur 7 hari & jam operasional), "
+                    "(2) HR & Cuti Karyawan (dengan alur cek saldo & pengajuan cuti), atau "
+                    "(3) Asisten Riset & Dokumen? "
+                    "Beri tahu saya agar draf dan instruksinya bisa langsung saya sesuaikan!"
+                )
+            else:
+                fallback_msg = (
+                    f"Draf awal untuk **{name}** telah siap dan langsung aktif di panel Test Chat sebelah kanan! "
+                    f"Anda bisa langsung mencobanya sekarang. Apakah ingin menambahkan aturan SOP khusus, gaya bahasa tertentu, atau mengintegrasikan tool baru?"
+                )
+
             return BuilderChatResponse(
-                message=f"Draf awal untuk **{name}** telah siap! Anda bisa langsung mencobanya di panel uji (Test Chat) di sebelah kanan. Apakah ingin menambahkan aturan khusus, gaya bahasa tertentu, atau mengintegrasikan tool baru?",
+                message=fallback_msg,
                 spec=draft_spec,
                 is_draft=True
             )

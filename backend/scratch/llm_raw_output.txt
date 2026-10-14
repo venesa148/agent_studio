@@ -1,0 +1,100 @@
+CONTENT:
+```json
+{
+  "message": "Halo! Senang sekali Anda bergabung di Agent Studio 🎉 Saya sudah menyiapkan draf 'Asisten AI Serbaguna' yang langsung aktif dan bisa Anda uji sekarang di panel Test Chat di sebelah kanan — draf ini sudah terhubung dengan tools yang tersedia seperti cek saldo cuti, pengajuan cuti, kalkulator, dan pencarian web. Supaya draf ini makin tajam, agen jenis apa yang sebenarnya ingin Anda bangun? Misalnya: (1) CS Toko Online — saya bisa tambahkan aturan retur 7 hari dan jam operasional toko, (2) HR & Cuti Karyawan — saya bisa lengkapi dengan alur eskalasi cuti mendadak dan cuti perintah kerja, atau (3) Asisten Riset/Dokumen — saya bisa atur format sitasi dan ringkasan otomatis. Sebutkan pilihan Anda atau ide lainnya, dan saya langsung sesuaikan spec-nya!",
+  "spec_updated": true,
+  "should_commit": false,
+  "spec": {
+    "name": "Asisten AI Serbaguna",
+    "description": "Asisten virtual serbaguna yang membantu karyawan mengelola cuti (cek saldo, mengajukan, memantau status, membatalkan), melakukan perhitungan angka, dan mencari informasi terkini di internet.",
+    "instructions": "PERAN: Kamu adalah 'Asisten AI Serbaguna', asisten virtual yang ramah, cepat, dan andal dalam bahasa Indonesia.\n\nSOP UTAMA:\n1. MANAJEMEN CUTI:\n   - Jika karyawan bertanya sisa saldo cuti, panggil tool 'check_leave_balance' dan sajikan ringkasan (hak, terpakai, tersisa).\n   - Jika karyawan ingin mengajukan cuti, kumpulkan data lengkap: jenis cuti, tanggal mulai, tanggal selesai, dan alasan. Sebelum mengirim, tampilkan RINGKASAN pengajuan dan minta konfirmasi eksplisit 'ya'. HANYA setelah konfirmasi, panggil 'submit_leave_request'.\n   - Jika karyawan ingin memantau status pengajuan, panggil 'get_leave_request_status' dan jelaskan statusnya dengan bahasa sederhana (menunggu persetujuan / disetujui / ditolak).\n   - Jika karyawan ingin membatalkan pengajuan, tampilkan detail pengajuan berdasarkan ID, minta konfirmasi eksplisit 'ya', baru panggil 'cancel_leave_request'.\n2. PERHITUNGAN: Gunakan tool 'calculator' untuk semua kalkulasi angka agar presisi (jangan menghitung manual).\n3. INFORMASI TERKINI: Gunakan tool 'search_web' jika pengguna bertanya tentang informasi terkini, berita, atau hal di luar pengetahuan internal.\n\nGAYA BICARA: Ramah, profesional, singkat, dan jelas. Gunakan sapaan hangat dan selalu tawarkan bantuan lanjutan yang relevan.\n\nFALLBACK: Jika data tidak ditemukan atau tool gagal, mohon maaf dengan sopan, jelaskan penyebabnya secara umum, dan sarankan langkah alternatif (misal: coba beberapa saat lagi atau hubungi HR langsung).\n\nBATASAN KEAMANAN: Jangan pernah mengirim atau membatalkan pengajuan tanpa konfirmasi eksplisit 'ya' dari pengguna. Jangan meminta atau menyimpan data sensitif di luar kebutuhan (password, data kartu). Jangan mengarang jawaban jika tidak yakin — katakan jujur dan cari via 'search_web' bila perlu.",
+    "tools": [
+      "check_leave_balance",
+      "submit_leave_request",
+      "get_leave_request_status",
+      "cancel_leave_request",
+      "calculator",
+      "search_web"
+    ]
+  },
+  "new_tools": [],
+  "coverage": {
+    "C1": "terisi",
+    "C2": "terisi",
+    "C3": "kosong",
+    "C4": "kosong",
+    "C5": "terisi",
+    "C6": "terisi",
+    "C7": "terisi",
+    "C8": "kosong",
+    "C9": "kosong",
+    "C10": "kosong",
+    "C11": "kosong",
+    "C12": "kosong"
+  }
+}
+```
+
+REASONING:
+The user typed "Saya ingin halo membuat ai" which is a general/greeting statement like "Hello, I want to make an AI". According to my instructions (rule 6), I should:
+
+1. NOT name the agent something like "Saya Ingin Membuat AI" - instead give a smart name like "Asisten AI Serbaguna" or adapt to the active tool catalog.
+2. In the message, welcome warmly and proactively ask what kind of agent they want to build, offering examples like (1) CS Toko Online, (2) HR & Cuti Karyawan, or (3) Asisten Dokumen/Riset.
+
+Looking at the tool catalog, there are HR-related tools available:
+- get_leave_request_status
+- cancel_leave_request
+- submit_leave_request
+- check_leave_balance
+- calculator
+- search_web
+
+Since the catalog is heavy on HR/leave management tools, I could design a draft "Asisten HR & Cuti Karyawan" that leverages these tools, OR a general "Asisten AI Serbaguna". The instruction says: "Berikan nama cerdas seperti 'Asisten AI Serbaguna' atau sesuaikan dengan tool aktif yang ada di katalog."
+
+Given the tool catalog is dominated by HR leave tools, it makes sense to create a draft that's HR-focused since those tools are actually available and functional. But the user hasn't specified yet. The instruction example message says: "Draf Asisten AI Serbaguna sudah saya siapkan dan siap diuji di panel kanan. Agen jenis apa yang ingin Anda bangun? Misalnya: (1) CS Toko Online, (2) HR & Cuti Karyawan, atau (3) Asisten Dokumen/Riset? Beri tahu saya agar draf ini bisa langsung saya sesuaikan!"
+
+I'll follow this pattern. I'll create a draft "Asisten AI Serbaguna" that includes the HR tools (since they're available) plus calculator and search_web, making it immediately testable. Actually, let me think - should the draft include all tools? A general-purpose assistant could use all of them. That makes it TURN-1 READY and testable.
+
+Let me design:
+
+Name: "Asisten AI Serbaguna"
+Description: Asisten virtual serbaguna yang membantu karyawan mengelola cuti (cek saldo, ajukan, pantau status, batalkan), melakukan perhitungan, dan mencari informasi di web.
+
+Instructions: Complete SOP in Indonesian:
+- Peran: Asisten AI serbaguna
+- SOP for leave management: check balance, submit (with explicit confirmation), check status, cancel (with explicit confirmation)
+- Calculator for math
+- search_web for real-time info
+- Gaya bicara: ramah, profesional, bahasa Indonesia
+- Fallback: if data empty, apologize and suggest
+- Security: never submit/cancel without explicit 'ya' confirmation, never ask for sensitive data
+
+Tools: get_leave_request_status, cancel_leave_request, submit_leave_request, check_leave_balance, calculator, search_web
+
+Coverage: C1-C12 - I need to fill in what's covered. Based on the format example:
+- C1: "terisi" (name/description?)
+- C2: "terisi"
+- C5: "terisi"
+- C6: "terisi"
+- C7: "terisi"
+Others "kosong"
+
+I don't know exactly what C1-C12 mean, but I'll follow the pattern from the example. Since this is a general draft, many things are still empty (like specific domain context, tone preferences, escalation rules, etc.). Let me mark:
+- C1: terisi (nama agent)
+- C2: terisi (deskripsi/peran)
+- C3: kosong (domain konteks spesifik?)
+- C4: kosong
+- C5: terisi (SOP/instruksi dasar)
+- C6: terisi (gaya bicara)
+- C7: terisi (tools)
+- C8-C12: kosong (fallback detail, batasan, dll.)
+
+Actually the example shows C1, C2, C5, C6, C7 terisi and rest kosong. I'll follow that since my draft is a general-purpose one with basic coverage.
+
+Message: Warm welcome + confirm draft created + invite to test in right panel + proactive specific suggestions. Since it's general, I'll ask which type of agent they want, giving domain-specific examples with concrete features (e.g., for CS Toko Online: retur policy, jam operasional; for HR: eskalasi cuti mendadak; for riset: format sitasi).
+
+should_commit: false (no explicit save request)
+spec_updated: true
+new_tools: []
+
+Let me write the JSON carefully with valid escaping.

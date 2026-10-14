@@ -163,15 +163,12 @@ class ToolRegistryService:
 
         # 1. get_referral_status
         if tool_name == "get_referral_status":
-            ref_id = str(params.get("referral_id") or params.get("referral_no") or "RUJ-2026-0001").strip()
-            
-            # Skenario Harness: jika referral 9999, return NOT_FOUND untuk memicu eskalasi
-            if "9999" in ref_id:
+            ref_id = str(params.get("referral_id") or params.get("referral_no") or "").strip()
+            if not ref_id:
                 return {
-                    "referral_no": ref_id,
-                    "status": "NOT_FOUND",
-                    "_source": "Database Layanan Rujukan",
-                    "message": f"Surat rujukan dengan nomor {ref_id} tidak ditemukan dalam basis data."
+                    "status": "error",
+                    "error_type": "VALIDATION_ERROR",
+                    "message": "Parameter 'referral_id' wajib disertakan untuk memeriksa status rujukan."
                 }
             
             target_url = f"{api_base}/api/v1/mock-bpjs/referral-status"
@@ -183,13 +180,13 @@ class ToolRegistryService:
                         res_dict = data if isinstance(data, dict) else resp.json()
                         if isinstance(res_dict, dict):
                             res_dict["_endpoint"] = target_url
-                            res_dict["_source"] = "Live Web API Teman"
+                            res_dict["_source"] = "External Service API"
                         return res_dict
                     return {
                         "status": "error",
                         "error_type": "REMOTE_API_ERROR",
                         "_endpoint": target_url,
-                        "_source": "Live Web API Teman",
+                        "_source": "External Service API",
                         "message": f"Server eksternal mengembalikan HTTP status {resp.status_code} saat mengecek rujukan {ref_id}."
                     }
             except Exception as e:
@@ -198,7 +195,7 @@ class ToolRegistryService:
                     "status": "error",
                     "error_type": "SERVICE_UNAVAILABLE",
                     "_endpoint": target_url,
-                    "_source": "Live Web API Teman (Offline)",
+                    "_source": "External Service API (Offline)",
                     "referral_id": ref_id,
                     "message": f"Server database faskes sedang tidak dapat dijangkau / offline ({type(e).__name__}). Data status rujukan {ref_id} tidak dapat diverifikasi saat ini."
                 }
@@ -216,9 +213,9 @@ class ToolRegistryService:
                         if data:
                             return {
                                 "city": city_raw,
-                                "source": "API Web Teman",
+                                "source": "External Hospital API",
                                 "_endpoint": target_url,
-                                "_source": "Live Web API Teman",
+                                "_source": "External Service API",
                                 "count": len(data),
                                 "hospitals": data
                             }
@@ -226,7 +223,7 @@ class ToolRegistryService:
                         "status": "error",
                         "error_type": "REMOTE_API_ERROR",
                         "_endpoint": target_url,
-                        "_source": "Live Web API Teman",
+                        "_source": "External Service API",
                         "message": f"Server faskes mengembalikan status {resp.status_code} saat mencari rumah sakit di {city_raw}."
                     }
             except Exception as e:
@@ -236,7 +233,7 @@ class ToolRegistryService:
                     "error_type": "SERVICE_UNAVAILABLE",
                     "city": city_raw,
                     "_endpoint": target_url,
-                    "_source": "Live Web API Teman (Offline)",
+                    "_source": "External Hospital API (Offline)",
                     "message": f"Server direktori rumah sakit sedang tidak dapat dijangkau / offline ({type(e).__name__}). Daftar faskes di wilayah '{city_raw}' belum dapat dimuat."
                 }
 
@@ -296,9 +293,9 @@ class ToolRegistryService:
                                 return {
                                     "specialty": specialty,
                                     "city": city,
-                                    "source": "API Web Teman (Live Database)",
+                                    "source": "External Hospital API (Live Database)",
                                     "_endpoint": target_url,
-                                    "_source": "Live Web API Teman (Database Dokter)",
+                                    "_source": "External Hospital API (Database Dokter)",
                                     "count": len(matched_doctors),
                                     "doctors": matched_doctors[:6]
                                 }
@@ -312,16 +309,16 @@ class ToolRegistryService:
                             return {
                                 "specialty": specialty,
                                 "city": city,
-                                "source": "API Web Teman",
+                                "source": "External Hospital API",
                                 "_endpoint": target_url,
-                                "_source": "Live Web API Teman",
+                                "_source": "External Hospital API",
                                 "doctors": data
                             }
                     return {
                         "status": "error",
                         "error_type": "REMOTE_API_ERROR",
                         "_endpoint": target_url,
-                        "_source": "Live Web API Teman",
+                        "_source": "External Hospital API",
                         "message": f"Server direktori spesialis mengembalikan status {resp_mock.status_code}."
                     }
             except Exception as e:
@@ -332,7 +329,7 @@ class ToolRegistryService:
                     "specialty": specialty,
                     "city": city,
                     "_endpoint": target_url,
-                    "_source": "Live Web API Teman (Offline)",
+                    "_source": "External Hospital API (Offline)",
                     "message": f"Server direktori dokter spesialis sedang tidak dapat dijangkau / offline ({type(e).__name__})."
                 }
 
@@ -349,13 +346,13 @@ class ToolRegistryService:
                         if data:
                             if isinstance(data, dict):
                                 data["_endpoint"] = target_url
-                                data["_source"] = "Live Web API Teman"
+                                data["_source"] = "External Hospital API"
                             return data
                     return {
                         "status": "error",
                         "error_type": "REMOTE_API_ERROR",
                         "_endpoint": target_url,
-                        "_source": "Live Web API Teman",
+                        "_source": "External Hospital API",
                         "message": f"Server validasi kepesertaan mengembalikan kode {resp.status_code}."
                     }
             except Exception as e:
@@ -364,7 +361,7 @@ class ToolRegistryService:
                     "status": "error",
                     "error_type": "SERVICE_UNAVAILABLE",
                     "_endpoint": target_url,
-                    "_source": "Live Web API Teman (Offline)",
+                    "_source": "External Hospital API (Offline)",
                     "participant_id": bpjs_id,
                     "message": f"Server sistem verifikasi sedang offline atau tidak dapat dijangkau ({type(e).__name__})."
                 }

@@ -14,8 +14,9 @@ import {
   CheckCircle2,
   Settings,
   Sparkles,
+  Trash2,
 } from "lucide-react";
-import { getDrafts, subscribeToDrafts, AgentDraft } from "@/lib/draftStore";
+import { getDrafts, subscribeToDrafts, deleteDraft, AgentDraft } from "@/lib/draftStore";
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -248,23 +249,42 @@ export function Sidebar({ collapsed = false, onToggleCollapse }: SidebarProps) {
                   {drafts.map((d) => {
                     const isDraftSelected = currentDraftId === d.id;
                     return (
-                      <Link
+                      <div
                         key={d.id}
-                        href={`/?draft_id=${d.id}`}
-                        className={`flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors text-left group ${
+                        className={`flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors group ${
                           isDraftSelected
                             ? "bg-amber-100/90 text-amber-950 font-semibold shadow-2xs"
                             : "text-amber-950 bg-amber-50/60 hover:bg-amber-100/80"
                         }`}
                       >
-                        <div className="flex items-center gap-2 truncate">
+                        <Link
+                          href={`/?draft_id=${d.id}`}
+                          className="flex items-center gap-2 truncate flex-1 min-w-0"
+                        >
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
                           <span className="truncate font-medium">{d.name || "Draf Baru"}</span>
+                        </Link>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                          <span className="text-[10px] text-amber-700 font-medium">
+                            {isDraftSelected ? "Aktif" : "Lanjut"}
+                          </span>
+                          <button
+                            type="button"
+                            title="Hapus draf"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              deleteDraft(d.id);
+                              if (isDraftSelected && typeof window !== "undefined") {
+                                window.location.href = "/";
+                              }
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-600 text-amber-700 transition-opacity cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
                         </div>
-                        <span className="text-[10px] text-amber-700 shrink-0 font-medium">
-                          {isDraftSelected ? "Aktif" : "Lanjut"}
-                        </span>
-                      </Link>
+                      </div>
                     );
                   })}
                 </div>

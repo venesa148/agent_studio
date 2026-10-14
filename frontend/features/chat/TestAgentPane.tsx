@@ -289,9 +289,9 @@ guardrails:
   max_turns: 15
   strict_grounding: true
   disallowed_behaviors:
-    - "memberi diagnosis pasti tanpa dokter"
-    - "merekomendasikan obat spesifik"
-    - "mengabaikan keluhan kondisi darurat"
+    - "mengarang informasi atau data fiktif di luar konteks (anti-halusinasi)"
+    - "membocorkan kredensial, API key, atau data privasi pengguna"
+    - "menjalankan aksi berisiko atau eksekusi tool tanpa persetujuan eksplisit"
 `;
   };
 
