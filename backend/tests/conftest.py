@@ -51,8 +51,8 @@ async def prepare_database():
         for t_name, t_desc, t_source in default_builtin_tools:
             t_id = str(uuid.uuid4())
             await conn.execute(
-                text("INSERT INTO tools (id, name, description, source_type, is_active, auth_custody, health_status, used_by, created_at) "
-                     "VALUES (:id, :name, :description, :source_type, 1, 'none', 'healthy', 'All agents', :created_at)"),
+                text("INSERT INTO tools (id, name, description, source_type, is_active, auth_custody, health_status, used_by, status, effect, created_at) "
+                     "VALUES (:id, :name, :description, :source_type, 1, 'none', 'healthy', 'All agents', 'published', 'read', :created_at)"),
                 {"id": t_id, "name": t_name, "description": t_desc, "source_type": t_source, "created_at": datetime.now(timezone.utc)}
             )
     yield

@@ -1,0 +1,7 @@
+```json
+{
+  "message": "Siap! Saya baru saja merancang draf 'TechScribe — Penulis Artikel Tech' lengkap dengan SOP penulisan 6 langkah: brief → riset via web search → outline → penulisan → paket SEO (meta description, keyword, slug) → revisi inkremental. Draf ini sudah aktif — silakan langsung uji di panel Test Chat di sebelah kanan, misalnya ketik: 'Tulis artikel 800 kata tentang tren AI agent 2025 untuk pembaca awam'. Dua saran spesifik untuk domain penulisan tech: (1) mau saya tambahkan aturan wajib menyertakan sumber/kutipan dari hasil riset web agar artikel bebas misinformasi dan mudah diverifikasi editor? (2) atau tambahkan mode khusus 'listicle & tutorial step-by-step' dengan blok kode untuk blog developer?",
+  "spec_updated": true,
+  "should_commit": false,
+  "spec": {
+    "name": "TechScribe —

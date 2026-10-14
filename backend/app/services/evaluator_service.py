@@ -237,6 +237,19 @@ class EvaluatorService:
         if safety_score < 60:
             areas.append("Tingkatkan kepatuhan guardrail keselamatan dan privasi data.")
 
+        suggested_patch = None
+        if overall < 80 or verdict == "FAILED":
+            suggested_patch = {
+                "scenario_input": input_text,
+                "expected_outcome": expected,
+                "suggested_instruction": (
+                    f"\n\n### Panduan Penanganan Skenario '{input_text}':\n"
+                    f"- Bila pengguna meminta hal terkait '{input_text}', pastikan untuk mengeksekusi tool atau menyediakan informasi '{expected}' secara akurat."
+                ),
+                "proposed_diff": f"+ Pastikan memanggil '{expected}' saat pengguna meminta '{input_text}'",
+                "status": "pending_review"
+            }
+
         return {
             "scores": {
                 "tool_accuracy": tool_score,
@@ -249,7 +262,8 @@ class EvaluatorService:
             "verdict": verdict,
             "strengths": strengths or ["Respon disajikan dengan jelas dan sopan."],
             "areas_for_improvement": areas or ["Pertahankan akurasi pemanggilan tool."],
-            "summary": f"Evaluasi selesai dengan skor keseluruhan {overall}/100 ({verdict})."
+            "summary": f"Evaluasi selesai dengan skor keseluruhan {overall}/100 ({verdict}).",
+            "suggested_patch": suggested_patch
         }
 
     @staticmethod
@@ -323,7 +337,30 @@ class EvaluatorService:
         overall_score = judge_result.get("overall_score", 0)
         verdict = str(judge_result.get("verdict", "FAILED")).lower()
 
-        # 4. Perbarui dan simpan hasil evaluasi ke database
+        # 4. Human-in-the-Loop Flywheel: Usulan Prompt Diff / Instruction Patch jika Evaluasi Gagal
+        if overall_score < 80 or verdict == "failed":
+            if "suggested_patch" not in judge_result or not judge_result["suggested_patch"]:
+                judge_result["suggested_patch"] = {
+                    "patch_id": f"patch_{eval_item.id[:8]}",
+                    "eval_id": eval_item.id,
+                    "agent_id": target_agent.id,
+                    "scenario_input": eval_item.input,
+                    "expected_outcome": eval_item.expected,
+                    "current_score": overall_score,
+                    "suggested_instruction": (
+                        f"\n\n### Panduan Penanganan Skenario '{eval_item.input}':\n"
+                        f"- Bila pengguna menanyakan atau meminta hal terkait '{eval_item.input}', pastikan untuk memanggil tool atau menyediakan informasi '{eval_item.expected}' secara akurat."
+                    ),
+                    "proposed_diff": f"+ Pastikan memanggil '{eval_item.expected}' untuk input '{eval_item.input}'",
+                    "status": "pending_review"
+                }
+            else:
+                patch_obj = judge_result["suggested_patch"]
+                patch_obj["eval_id"] = eval_item.id
+                patch_obj["agent_id"] = target_agent.id
+                patch_obj.setdefault("patch_id", f"patch_{eval_item.id[:8]}")
+
+        # 5. Perbarui dan simpan hasil evaluasi ke database
         eval_item.actual = actual_text
         eval_item.status = verdict  # "passed" / "failed"
         eval_item.score = overall_score
@@ -333,6 +370,50 @@ class EvaluatorService:
         await db.commit()
         await db.refresh(eval_item)
         return eval_item
+
+    @staticmethod
+    async def apply_instruction_patch(
+        db: AsyncSession,
+        agent_id: str,
+        eval_id: Optional[str] = None,
+        patch_text: Optional[str] = None
+    ) -> Optional[AgentSpecModel]:
+        """
+        Human-in-the-Loop (HITL) Flywheel:
+        Menerapkan usulan perbaikan instruksi (suggested_patch) ke spesifikasi Agent
+        setelah verifikasi manusia, tanpa menimbulkan prompt drift secara liar.
+        """
+        agent_res = await db.execute(select(AgentSpecModel).where(AgentSpecModel.id == agent_id))
+        agent = agent_res.scalars().first()
+        if not agent:
+            return None
+
+        instruction_to_apply = patch_text
+
+        if eval_id:
+            eval_res = await db.execute(select(EvaluationModel).where(EvaluationModel.id == eval_id))
+            eval_item = eval_res.scalars().first()
+            if eval_item and eval_item.details:
+                patch_data = eval_item.details.get("suggested_patch")
+                if patch_data:
+                    if not instruction_to_apply:
+                        instruction_to_apply = patch_data.get("suggested_instruction")
+                    patch_data["status"] = "applied"
+                    patch_data["applied_at"] = datetime.utcnow().isoformat()
+                    eval_item.details["suggested_patch"] = patch_data
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(eval_item, "details")
+
+        if instruction_to_apply:
+            current_inst = (agent.instructions or "").strip()
+            new_patch = instruction_to_apply.strip()
+            if new_patch not in current_inst:
+                agent.instructions = f"{current_inst}\n\n{new_patch}"
+                agent.updated_at = datetime.utcnow()
+                await db.commit()
+                await db.refresh(agent)
+
+        return agent
 
     @staticmethod
     async def run_all_evaluations(db: AsyncSession) -> List[EvaluationModel]:

@@ -1,13 +1,111 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import or_, select
-from typing import List, Dict, Any, Optional
+import logging
+import os
 import time
-import httpx
-from app.models.tool import ToolModel
+from typing import Any, Dict, List, Optional
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
 from app.models.mcp import MCPServerModel
+from app.models.tool import ToolModel
+from app.services.executors.http_executor import GenericHttpExecutor
+from app.services.executors.native_executor import NativePythonExecutor
 from app.services.mcp_client import MCPClientService
 
+logger = logging.getLogger("tool_registry")
+
+# Deklarasi skema default untuk katalog showcase tools
+# Seluruh pemanggilan dieksekusi secara generik & dinamis oleh GenericHttpExecutor
+CATALOG_TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "get_referral_status": {
+        "type": "http",
+        "method": "POST",
+        "url": "{api_base}/api/v1/mock-bpjs/referral-status",
+        "param_mapping": {"referral_id": "referral_no"},
+        "source_label": "External Service API",
+        "timeout_ms": 6000,
+    },
+    "search_hospital": {
+        "type": "http",
+        "method": "POST",
+        "url": "{api_base}/api/v1/mock-bpjs/hospitals",
+        "param_mapping": {"city": "location"},
+        "source_label": "External Hospital API",
+        "timeout_ms": 6000,
+    },
+    "search_hospitals": {
+        "type": "http",
+        "method": "POST",
+        "url": "{api_base}/api/v1/mock-bpjs/hospitals",
+        "param_mapping": {"city": "location"},
+        "source_label": "External Hospital API",
+        "timeout_ms": 6000,
+    },
+    "hospital_finder": {
+        "type": "http",
+        "method": "POST",
+        "url": "{api_base}/api/v1/mock-bpjs/hospitals",
+        "param_mapping": {"city": "location"},
+        "source_label": "External Hospital API",
+        "timeout_ms": 6000,
+    },
+    "check_bpjs": {
+        "type": "http",
+        "method": "POST",
+        "url": "{api_base}/api/v1/mock-bpjs/check-bpjs",
+        "param_mapping": {"participant_id": "number", "bpjs_id": "number", "hospital_id": "number"},
+        "source_label": "External Hospital API",
+        "timeout_ms": 6000,
+    },
+    "get_participant_status": {
+        "type": "http",
+        "method": "POST",
+        "url": "{api_base}/api/v1/mock-bpjs/check-bpjs",
+        "param_mapping": {"participant_id": "number", "bpjs_id": "number", "hospital_id": "number"},
+        "source_label": "External Hospital API",
+        "timeout_ms": 6000,
+    },
+    "create_appointment": {
+        "type": "http",
+        "method": "POST",
+        "url": "{api_base}/api/bookings",
+        "source_label": "Live Web API Appointment",
+        "timeout_ms": 6000,
+    },
+    "get_appointment": {
+        "type": "http",
+        "method": "GET",
+        "url": "{api_base}/api/bookings/{booking_id}",
+        "param_mapping": {"id": "booking_id", "booking_code": "booking_id"},
+        "source_label": "Live Web API Appointment",
+        "timeout_ms": 6000,
+    },
+    "find_specialist": {
+        "type": "http",
+        "method": "GET",
+        "url": "{api_base}/api/doctors/availability",
+        "source_label": "External Hospital API",
+        "timeout_ms": 6000,
+    },
+    "search_doctors": {
+        "type": "http",
+        "method": "GET",
+        "url": "{api_base}/api/doctors/availability",
+        "source_label": "External Hospital API",
+        "timeout_ms": 6000,
+    },
+}
+
+
 class ToolRegistryService:
+    """
+    Unified Tool Broker:
+    Pintu gerbang tunggal eksekusi seluruh tools di Agent Studio.
+    Merutekan eksekusi secara dinamis ke:
+    1. GenericHttpExecutor (Semua REST API tools buatan builder maupun katalog)
+    2. NativePythonExecutor (Algoritma deterministik lokal Python: kalkulator, triase, web search)
+    3. MCPClientService (Tools eksternal Model Context Protocol)
+    """
 
     @staticmethod
     async def get_all_tools(db: AsyncSession) -> List[ToolModel]:
@@ -15,111 +113,16 @@ class ToolRegistryService:
         return list(result.scalars().all())
 
     @staticmethod
-    async def execute_tool(db: AsyncSession, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def resolve_api_base(db: AsyncSession, tool_entry: Optional[ToolModel] = None) -> str:
         """
-        Mengeksekusi tool berdasarkan registrasi di catalog (baik built-in maupun MCP tool).
+        Resolusi dinamis api_base tanpa hardcoding:
+        1. Cek konfigurasi x-api-config atau x-openapi dari input_schema tool
+        2. Cek mcp_server_id dari tool_entry
+        3. Cek server MCP eksternal yang aktif/terhubung di database
+        4. Fallback ke settings.EXTERNAL_MOCK_API_URL / environment variable
         """
-        start_time = time.time()
-        
-        # Cari info tool dari database
-        result = await db.execute(select(ToolModel).where(ToolModel.name == tool_name))
-        tool_entry = result.scalar_one_or_none()
+        api_base: Optional[str] = None
 
-        output: Any = None
-
-        if not tool_entry or not tool_entry.is_active:
-            raise ValueError(f"Tool '{tool_name}' tidak terdaftar atau tidak aktif.")
-
-        # 1. Prioritas Utama: Eksekusi deklaratif dinamis jika memiliki konfigurasi implementation (Bagan A / Tool Factory)
-        if tool_entry.implementation and tool_entry.implementation.get("type") == "http":
-            output = await ToolRegistryService._execute_declarative_http(tool_entry, params)
-        elif tool_entry.source_type == "mcp" and tool_entry.mcp_server_id:
-            # Ambil detail MCP Server
-            mcp_result = await db.execute(select(MCPServerModel).where(MCPServerModel.id == tool_entry.mcp_server_id))
-            mcp_server = mcp_result.scalar_one_or_none()
-            if not mcp_server:
-                raise ValueError(f"MCP server untuk tool '{tool_name}' tidak ditemukan.")
-            server_url = mcp_server.url
-            try:
-                output = await MCPClientService.call_tool(server_url, tool_name, params)
-            except Exception:
-                # Fallback ke deklaratif / builtin jika gagal
-                output = await ToolRegistryService._execute_builtin_tool(tool_name, params, db=db, tool_entry=tool_entry)
-        elif tool_entry and tool_entry.source_type == "openapi":
-            output = await ToolRegistryService._execute_openapi_tool(tool_entry, params)
-        elif tool_entry and tool_entry.source_type == "builtin":
-            output = await ToolRegistryService._execute_builtin_tool(tool_name, params, db=db, tool_entry=tool_entry)
-        else:
-            raise ValueError(f"Tool '{tool_name}' tidak memiliki executor yang didukung.")
-
-        duration_ms = int((time.time() - start_time) * 1000)
-
-        return {
-            "name": tool_name,
-            "params": params,
-            "result": output,
-            "duration_ms": duration_ms
-        }
-
-    @staticmethod
-    async def _execute_declarative_http(tool_entry: ToolModel, params: Dict[str, Any]) -> Any:
-        """
-        Eksekusi tool HTTP deklaratif murni dari spesifikasi implementation di database.
-        Mendukung GET, POST, PUT, DELETE dengan substitusi parameter dan proteksi timeout.
-        """
-        impl = tool_entry.implementation or {}
-        method = (impl.get("method") or "GET").upper()
-        url = impl.get("url") or ""
-
-        # Substitusi placeholder URL seperti {id} atau {city}
-        used_keys = set()
-        for k, v in params.items():
-            placeholder = f"{{{k}}}"
-            if placeholder in url:
-                url = url.replace(placeholder, str(v))
-                used_keys.add(k)
-
-        headers = dict(impl.get("headers", {}))
-        auth_conf = impl.get("auth") or {}
-        if auth_conf.get("in") == "header" and auth_conf.get("name") and auth_conf.get("secret"):
-            headers[auth_conf["name"]] = auth_conf["secret"]
-
-        timeout_sec = float(impl.get("timeout_ms", 10000)) / 1000.0
-
-        async with httpx.AsyncClient(timeout=timeout_sec, follow_redirects=True) as client:
-            if method == "GET":
-                query_params = {k: v for k, v in params.items() if k not in used_keys}
-                resp = await client.get(url, params=query_params, headers=headers)
-            else:
-                resp = await client.request(method, url, json=params, headers=headers)
-
-            if resp.status_code >= 400:
-                return {"error": f"http_{resp.status_code}", "detail": resp.text[:300]}
-            try:
-                data = resp.json()
-            except Exception:
-                data = resp.text
-
-            select_fields = impl.get("response", {}).get("select")
-            if select_fields and isinstance(data, dict):
-                data = {k: data.get(k) for k in select_fields if k in data}
-            return data
-
-    @staticmethod
-    async def _execute_builtin_tool(
-        tool_name: str, params: Dict[str, Any], db: Optional[AsyncSession] = None, tool_entry: Optional[ToolModel] = None
-    ) -> Any:
-        """
-        Eksekutor khusus untuk Built-in Sample Tools bawaan katalog showcase (contoh: rujukan faskes & direktori RS).
-        Catatan Penting: Tool eksternal, custom HTTP, OpenAPI, dan MCP yang dibuat pengguna TIDAK melalui metode ini,
-        melainkan dieksekusi secara murni deklaratif dan dinamis melalui _execute_declarative_http, _execute_openapi_tool,
-        atau MCPClientService.
-        """
-        import os
-        from app.core.config import settings
-
-        # Resolusi dinamis api_base dari database (input_schema tool / mcp_server) sebelum fallback ke .env
-        api_base = None
         if tool_entry and tool_entry.input_schema:
             api_base = (
                 tool_entry.input_schema.get("x-api-config", {}).get("base_url")
@@ -127,594 +130,131 @@ class ToolRegistryService:
                 or tool_entry.input_schema.get("base_url")
             )
 
-        if not api_base and db:
-            if tool_entry and tool_entry.mcp_server_id:
-                mcp_res = await db.execute(select(MCPServerModel).where(MCPServerModel.id == tool_entry.mcp_server_id))
-                mcp_srv = mcp_res.scalar_one_or_none()
-                if mcp_srv and mcp_srv.url and not mcp_srv.url.endswith("/local-server"):
-                    api_base = mcp_srv.url
-
-            if not api_base:
-                t_res = await db.execute(select(ToolModel).where(ToolModel.name == tool_name))
-                t_obj = t_res.scalar_one_or_none()
-                if t_obj:
-                    if t_obj.input_schema:
-                        api_base = (
-                            t_obj.input_schema.get("x-api-config", {}).get("base_url")
-                            or t_obj.input_schema.get("x-openapi", {}).get("server_url")
-                            or t_obj.input_schema.get("base_url")
-                        )
-                    if not api_base and t_obj.mcp_server_id:
-                        mcp_res = await db.execute(select(MCPServerModel).where(MCPServerModel.id == t_obj.mcp_server_id))
-                        mcp_srv = mcp_res.scalar_one_or_none()
-                        if mcp_srv and mcp_srv.url and not mcp_srv.url.endswith("/local-server"):
-                            api_base = mcp_srv.url
-
-            if not api_base:
-                ext_mcp_res = await db.execute(
-                    select(MCPServerModel).where(
-                        MCPServerModel.status == "connected",
-                        MCPServerModel.url.notlike("%/local-server%"),
-                        MCPServerModel.url.notlike("%localhost:8080%")
-                    ).order_by(MCPServerModel.updated_at.desc())
-                )
-                ext_srv = ext_mcp_res.scalars().first()
-                if ext_srv and ext_srv.url:
-                    api_base = ext_srv.url
+        if not api_base and tool_entry and tool_entry.mcp_server_id:
+            mcp_res = await db.execute(select(MCPServerModel).where(MCPServerModel.id == tool_entry.mcp_server_id))
+            mcp_srv = mcp_res.scalar_one_or_none()
+            if mcp_srv and mcp_srv.url and not mcp_srv.url.endswith("/local-server"):
+                api_base = mcp_srv.url
 
         if not api_base:
-            api_base = (getattr(settings, "EXTERNAL_MOCK_API_URL", None) or os.getenv("EXTERNAL_MOCK_API_URL", "")).rstrip("/")
+            ext_mcp_res = await db.execute(
+                select(MCPServerModel).where(
+                    MCPServerModel.status == "connected",
+                    MCPServerModel.url.notlike("%/local-server%"),
+                    MCPServerModel.url.notlike("%localhost:8080%"),
+                ).order_by(MCPServerModel.updated_at.desc())
+            )
+            ext_srv = ext_mcp_res.scalars().first()
+            if ext_srv and ext_srv.url:
+                api_base = ext_srv.url
 
-        api_base = str(api_base).rstrip("/")
+        if not api_base:
+            api_base = (
+                getattr(settings, "EXTERNAL_MOCK_API_URL", None)
+                or os.getenv("EXTERNAL_MOCK_API_URL", "")
+            )
 
-        # 1. get_referral_status
-        if tool_name == "get_referral_status":
-            ref_id = str(params.get("referral_id") or params.get("referral_no") or "").strip()
-            if not ref_id:
-                return {
-                    "status": "error",
-                    "error_type": "VALIDATION_ERROR",
-                    "message": "Parameter 'referral_id' wajib disertakan untuk memeriksa status rujukan."
-                }
-            
-            target_url = f"{api_base}/api/v1/mock-bpjs/referral-status"
-            try:
-                async with httpx.AsyncClient(timeout=6.0) as client:
-                    resp = await client.post(target_url, json={"referral_no": ref_id})
-                    if resp.status_code == 200:
-                        data = resp.json().get("data", {})
-                        res_dict = data if isinstance(data, dict) else resp.json()
-                        if isinstance(res_dict, dict):
-                            res_dict["_endpoint"] = target_url
-                            res_dict["_source"] = "External Service API"
-                        return res_dict
-                    return {
-                        "status": "error",
-                        "error_type": "REMOTE_API_ERROR",
-                        "_endpoint": target_url,
-                        "_source": "External Service API",
-                        "message": f"Server eksternal mengembalikan HTTP status {resp.status_code} saat mengecek rujukan {ref_id}."
-                    }
-            except Exception as e:
-                print(f"[Remote API Error] referral-status call failed: {e}")
-                return {
-                    "status": "error",
-                    "error_type": "SERVICE_UNAVAILABLE",
-                    "_endpoint": target_url,
-                    "_source": "External Service API (Offline)",
-                    "referral_id": ref_id,
-                    "message": f"Server database faskes sedang tidak dapat dijangkau / offline ({type(e).__name__}). Data status rujukan {ref_id} tidak dapat diverifikasi saat ini."
-                }
-
-        # 2. search_hospital / hospital_finder / search_hospitals
-        elif tool_name in ["search_hospital", "hospital_finder", "search_hospitals"]:
-            city_raw = str(params.get("city") or params.get("location") or "Jakarta").strip()
-            target_url = f"{api_base}/api/v1/mock-bpjs/hospitals"
-            
-            try:
-                async with httpx.AsyncClient(timeout=6.0) as client:
-                    resp = await client.post(target_url, json={"location": city_raw})
-                    if resp.status_code == 200:
-                        data = resp.json().get("data", [])
-                        if data:
-                            return {
-                                "city": city_raw,
-                                "source": "External Hospital API",
-                                "_endpoint": target_url,
-                                "_source": "External Service API",
-                                "count": len(data),
-                                "hospitals": data
-                            }
-                    return {
-                        "status": "error",
-                        "error_type": "REMOTE_API_ERROR",
-                        "_endpoint": target_url,
-                        "_source": "External Service API",
-                        "message": f"Server faskes mengembalikan status {resp.status_code} saat mencari rumah sakit di {city_raw}."
-                    }
-            except Exception as e:
-                print(f"[Remote API Error] hospitals call failed: {e}")
-                return {
-                    "status": "error",
-                    "error_type": "SERVICE_UNAVAILABLE",
-                    "city": city_raw,
-                    "_endpoint": target_url,
-                    "_source": "External Hospital API (Offline)",
-                    "message": f"Server direktori rumah sakit sedang tidak dapat dijangkau / offline ({type(e).__name__}). Daftar faskes di wilayah '{city_raw}' belum dapat dimuat."
-                }
-
-        # 3. find_specialist / search_doctors
-        elif tool_name in ["find_specialist", "search_doctors"]:
-            specialty = str(params.get("specialty") or "Penyakit Dalam").strip()
-            city = str(params.get("city") or params.get("location") or params.get("hospital_name") or "Jakarta").strip()
-            target_url = f"{api_base}/api/doctors/availability"
-
-            try:
-                async with httpx.AsyncClient(timeout=6.0) as client:
-                    # 1. Coba ambil data dokter live dari basis data resmi web teman (/api/doctors/availability)
-                    resp = await client.get(target_url, headers={"Accept": "application/json"})
-                    if resp.status_code == 200:
-                        all_docs = resp.json().get("data", [])
-                        if isinstance(all_docs, list) and len(all_docs) > 0:
-                            spec_lower = specialty.lower()
-                            city_lower = city.lower()
-                            matched_doctors = []
-
-                            for d in all_docs:
-                                d_spec = (d.get("specialty_name") or "").lower()
-                                d_name = (d.get("doctor_name") or "").lower()
-                                d_hosp = (d.get("hospital_name") or "").lower()
-
-                                # Pencocokan spesialisasi yang akurat (gelar dan poli)
-                                match_spec = False
-                                if "mata" in spec_lower and ("mata" in d_spec or "sp.m" in d_name):
-                                    match_spec = True
-                                elif ("dalam" in spec_lower or "interna" in spec_lower) and ("dalam" in d_spec or "sp.pd" in d_name):
-                                    match_spec = True
-                                elif "anak" in spec_lower and ("anak" in d_spec or "sp.a" in d_name):
-                                    match_spec = True
-                                elif ("jantung" in spec_lower or "kardio" in spec_lower) and ("jantung" in d_spec or "sp.jp" in d_name):
-                                    match_spec = True
-                                elif "bedah" in spec_lower and ("bedah" in d_spec or "sp.b" in d_name):
-                                    match_spec = True
-                                elif spec_lower in d_spec or spec_lower in d_name:
-                                    match_spec = True
-
-                                if match_spec:
-                                    # Filter rumah sakit/lokasi jika spesifik
-                                    if not city_lower or city_lower == "jakarta" or any(w in d_hosp for w in city_lower.split()):
-                                        sched_list = [
-                                            f"{s.get('date')} ({s.get('start_time')}-{s.get('end_time')})"
-                                            for s in d.get("schedules", [])
-                                            if s.get("is_available")
-                                        ]
-                                        matched_doctors.append({
-                                            "nama_dokter": d.get("doctor_name"),
-                                            "spesialisasi": d.get("specialty_name"),
-                                            "rumah_sakit": d.get("hospital_name"),
-                                            "jadwal_praktek": ", ".join(sched_list[:2]) if sched_list else "Tersedia di faskes"
-                                        })
-
-                            if matched_doctors:
-                                return {
-                                    "specialty": specialty,
-                                    "city": city,
-                                    "source": "External Hospital API (Live Database)",
-                                    "_endpoint": target_url,
-                                    "_source": "External Hospital API (Database Dokter)",
-                                    "count": len(matched_doctors),
-                                    "doctors": matched_doctors[:6]
-                                }
-
-                    # 2. Fallback ke endpoint mock jika format live availability kosong
-                    target_url = f"{api_base}/api/v1/mock-bpjs/specialists"
-                    resp_mock = await client.post(target_url, json={"specialty": specialty, "location": city})
-                    if resp_mock.status_code == 200:
-                        data = resp_mock.json().get("data", [])
-                        if data:
-                            return {
-                                "specialty": specialty,
-                                "city": city,
-                                "source": "External Hospital API",
-                                "_endpoint": target_url,
-                                "_source": "External Hospital API",
-                                "doctors": data
-                            }
-                    return {
-                        "status": "error",
-                        "error_type": "REMOTE_API_ERROR",
-                        "_endpoint": target_url,
-                        "_source": "External Hospital API",
-                        "message": f"Server direktori spesialis mengembalikan status {resp_mock.status_code}."
-                    }
-            except Exception as e:
-                print(f"[Remote API Error] specialists call failed: {e}")
-                return {
-                    "status": "error",
-                    "error_type": "SERVICE_UNAVAILABLE",
-                    "specialty": specialty,
-                    "city": city,
-                    "_endpoint": target_url,
-                    "_source": "External Hospital API (Offline)",
-                    "message": f"Server direktori dokter spesialis sedang tidak dapat dijangkau / offline ({type(e).__name__})."
-                }
-
-        # 4. check_bpjs / get_participant_status
-        elif tool_name in ["check_bpjs", "get_participant_status"]:
-            bpjs_id = str(params.get("participant_id") or params.get("bpjs_id") or params.get("number") or params.get("hospital_id") or "").strip()
-            target_url = f"{api_base}/api/v1/mock-bpjs/check-bpjs"
-            
-            try:
-                async with httpx.AsyncClient(timeout=6.0) as client:
-                    resp = await client.post(target_url, json={"number": bpjs_id})
-                    if resp.status_code == 200:
-                        data = resp.json().get("data", {})
-                        if data:
-                            if isinstance(data, dict):
-                                data["_endpoint"] = target_url
-                                data["_source"] = "External Hospital API"
-                            return data
-                    return {
-                        "status": "error",
-                        "error_type": "REMOTE_API_ERROR",
-                        "_endpoint": target_url,
-                        "_source": "External Hospital API",
-                        "message": f"Server validasi kepesertaan mengembalikan kode {resp.status_code}."
-                    }
-            except Exception as e:
-                print(f"[Remote API Error] check-bpjs call failed: {e}")
-                return {
-                    "status": "error",
-                    "error_type": "SERVICE_UNAVAILABLE",
-                    "_endpoint": target_url,
-                    "_source": "External Hospital API (Offline)",
-                    "participant_id": bpjs_id,
-                    "message": f"Server sistem verifikasi sedang offline atau tidak dapat dijangkau ({type(e).__name__})."
-                }
-
-        # 5. search_web (Real Live Web Search)
-        elif tool_name == "search_web":
-            query = str(params.get("query") or params.get("q") or "").strip()
-            if not query:
-                return {"status": "error", "message": "Parameter 'query' pencarian tidak boleh kosong."}
-
-            # 1. Coba pencarian web live menggunakan DuckDuckGo Search Engine (ddgs)
-            try:
-                from ddgs import DDGS
-                with DDGS() as ddgs:
-                    raw_results = list(ddgs.text(query, region="id-id", max_results=4))
-                    if not raw_results:
-                        raw_results = list(ddgs.text(query, region="wt-wt", max_results=4))
-                if raw_results:
-                    formatted_results = [
-                        {
-                            "title": r.get("title", ""),
-                            "snippet": r.get("body", ""),
-                            "url": r.get("href", "")
-                        }
-                        for r in raw_results
-                    ]
-                    return {
-                        "status": "ok",
-                        "query": query,
-                        "_source": "DuckDuckGo Live Web Search",
-                        "_endpoint": "https://duckduckgo.com",
-                        "count": len(formatted_results),
-                        "results": formatted_results
-                    }
-            except Exception as e_search:
-                print(f"[Live Web Search Warning]: {e_search}")
-
-            # 2. Fallback ke remote API jika dikonfigurasi
-            target_url = f"{api_base}/api/v1/search-web" if api_base and "trycloudflare" not in api_base else ""
-            if target_url:
-                try:
-                    async with httpx.AsyncClient(timeout=6.0) as client:
-                        resp = await client.post(target_url, json={"query": query})
-                        if resp.status_code == 200:
-                            data = resp.json().get("data", {})
-                            if data:
-                                if isinstance(data, dict):
-                                    data["_endpoint"] = target_url
-                                    data["_source"] = "Remote Web Search API"
-                                return data
-                except Exception as e:
-                    print(f"[Remote API Warning] search-web call failed: {e}")
-
-            return {
-                "status": "error",
-                "error_type": "SEARCH_FAILED",
-                "_source": "Web Search Provider",
-                "query": query,
-                "message": f"Layanan pencarian web sedang tidak dapat memuat hasil untuk kueri '{query}'."
-            }
-
-        # 6. calculator / math_eval
-        elif tool_name in ["calculator", "math_eval"]:
-            expr = str(params.get("expression") or params.get("expr") or "").strip()
-            if not expr:
-                return {"status": "error", "message": "Parameter 'expression' tidak boleh kosong."}
-            try:
-                import ast
-                import operator
-                operators = {
-                    ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
-                    ast.Div: operator.truediv, ast.Pow: operator.pow, ast.USub: operator.neg, ast.Mod: operator.mod
-                }
-                def _eval(node):
-                    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-                        return node.value
-                    elif isinstance(node, ast.BinOp) and type(node.op) in operators:
-                        return operators[type(node.op)](_eval(node.left), _eval(node.right))
-                    elif isinstance(node, ast.UnaryOp) and type(node.op) in operators:
-                        return operators[type(node.op)](_eval(node.operand))
-                    raise ValueError("Ekspresi matematika mengandung operator yang tidak diizinkan.")
-                parsed = ast.parse(expr, mode='eval')
-                calc_val = _eval(parsed.body)
-                return {
-                    "status": "ok",
-                    "expression": expr,
-                    "result": calc_val,
-                    "_source": "Core Math Engine",
-                    "_endpoint": "internal://calculator"
-                }
-            except Exception as e_calc:
-                return {"status": "error", "expression": expr, "message": f"Gagal mengevaluasi ekspresi: {str(e_calc)}"}
-
-        # 7. api_fetch / http_request (Generic REST API Runner)
-        elif tool_name in ["api_fetch", "http_request"]:
-            target_url = str(params.get("url") or "").strip()
-            method = str(params.get("method") or "GET").upper()
-            body = params.get("body")
-            headers = params.get("headers") or {}
-            if not target_url:
-                return {"status": "error", "message": "Parameter 'url' tidak boleh kosong."}
-            try:
-                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                    if method == "POST":
-                        resp = await client.post(target_url, json=body, headers=headers)
-                    else:
-                        resp = await client.get(target_url, headers=headers)
-                    try:
-                        resp_data = resp.json()
-                    except Exception:
-                        resp_data = resp.text[:1000]
-                    return {
-                        "status": "ok",
-                        "status_code": resp.status_code,
-                        "data": resp_data,
-                        "_endpoint": target_url,
-                        "_source": f"REST API ({method})"
-                    }
-            except Exception as e_http:
-                return {
-                    "status": "error",
-                    "error_type": "HTTP_REQUEST_FAILED",
-                    "_endpoint": target_url,
-                    "_source": "REST API Runner",
-                    "message": f"Gagal memanggil endpoint '{target_url}': {str(e_http)}"
-                }
-
-        # 8. classify_complaint (Domain-Specific Built-in Sample Tool: Healthcare Clinical Triage Protocol)
-        # Catatan Arsitektur: Tool ini merupakan contoh katalog spesifik domain medis untuk demo rujukan/triase,
-        # dan HANYA dipanggil jika agen terkait secara eksplisit mendaftarkan 'classify_complaint' dalam daftar tools-nya.
-        elif tool_name == "classify_complaint":
-            complaint = str(params.get("complaint") or params.get("keluhan") or "").strip()
-            if not complaint:
-                return {"status": "error", "message": "Parameter 'complaint' tidak boleh kosong."}
-
-            complaint_lower = complaint.lower()
-            red_flags = ["pingsan", "sesak nafas", "nyeri dada hebat", "darurat", "kejang", "tidak sadar", "pendarahan hebat", "stroke", "lumpuh", "koma"]
-            matched_red_flags = [rf for rf in red_flags if rf in complaint_lower]
-            if matched_red_flags:
-                return {
-                    "status": "ok",
-                    "triage_class": "EMERGENCY",
-                    "red_flag": True,
-                    "matched_red_flags": matched_red_flags,
-                    "candidate_service": ["IGD / Instalasi Gawat Darurat"],
-                    "action": "ESCALATE_TO_EMERGENCY",
-                    "_source": "Clinical Triage Protocol",
-                    "message": "Terdeteksi indikasi gawat darurat (Red Flag). Alur booking dokter reguler dihentikan. Segera arahkan pasien ke IGD rumah sakit terdekat atau hubungi 119."
-                }
-
-            ortho_kw = ["lutut", "sendi", "tulang", "patah", "keseleo", "otot", "kaki", "pinggang", "punggung", "tangan", "bahu", "engsel", "retak"]
-            if any(k in complaint_lower for k in ortho_kw):
-                return {
-                    "status": "ok",
-                    "triage_class": "NEED_FURTHER_CARE",
-                    "red_flag": False,
-                    "complaint_summary": complaint,
-                    "candidate_service": ["Orthopaedi", "Rehabilitasi Medik"],
-                    "requires_eligibility_check": True,
-                    "clarifying_questions": [
-                        "Apakah ada pembengkakan atau kemerahan pada area lutut/sendi?",
-                        "Apakah ada riwayat cedera fisik atau jatuh?",
-                        "Apakah pasien masih dapat berjalan atau menopang berat badan?"
-                    ],
-                    "_source": "Clinical Triage Protocol",
-                    "message": "Keluhan mengarah ke sistem muskuloskeletal. Disarankan pemeriksaan lanjutan ke poli Orthopaedi atau Rehabilitasi Medik."
-                }
-
-            if any(k in complaint_lower for k in ["mata", "rabun", "katarak", "silau", "penglihatan"]):
-                return {
-                    "status": "ok",
-                    "triage_class": "NEED_FURTHER_CARE",
-                    "red_flag": False,
-                    "complaint_summary": complaint,
-                    "candidate_service": ["Poli Spesialis Mata"],
-                    "requires_eligibility_check": True,
-                    "_source": "Clinical Triage Protocol",
-                    "message": "Disarankan konsultasi ke poli Spesialis Mata."
-                }
-
-            if any(k in complaint_lower for k in ["gigi", "gusi", "geraham", "tambal", "cabut gigi"]):
-                return {
-                    "status": "ok",
-                    "triage_class": "NEED_FURTHER_CARE",
-                    "red_flag": False,
-                    "candidate_service": ["Poli Gigi & Mulut"],
-                    "requires_eligibility_check": True,
-                    "_source": "Clinical Triage Protocol",
-                    "message": "Disarankan konsultasi ke Poli Gigi & Mulut."
-                }
-
-            if any(k in complaint_lower for k in ["anak", "bayi", "balita"]):
-                return {
-                    "status": "ok",
-                    "triage_class": "NEED_FURTHER_CARE",
-                    "red_flag": False,
-                    "candidate_service": ["Poli Spesialis Anak"],
-                    "requires_eligibility_check": True,
-                    "_source": "Clinical Triage Protocol",
-                    "message": "Disarankan konsultasi ke Poli Spesialis Anak."
-                }
-
-            if any(k in complaint_lower for k in ["sakit", "nyeri", "demam", "batuk", "flu", "pusing", "mual", "perut", "diare", "gatal"]):
-                return {
-                    "status": "ok",
-                    "triage_class": "NEED_FURTHER_CARE",
-                    "red_flag": False,
-                    "candidate_service": ["Poli Umum FKTP", "Poli Penyakit Dalam"],
-                    "requires_eligibility_check": True,
-                    "_source": "Clinical Triage Protocol",
-                    "message": "Disarankan pemeriksaan awal di FKTP terdaftar (Puskesmas/Klinik)."
-                }
-
-            return {
-                "status": "ok",
-                "triage_class": "INFORMATION_ONLY",
-                "red_flag": False,
-                "candidate_service": [],
-                "requires_eligibility_check": False,
-                "_source": "Clinical Triage Protocol",
-                "message": "Pertanyaan administratif atau informasi umum, tidak memerlukan rujukan dokter spesialis."
-            }
-
-        # 9. create_appointment
-        elif tool_name == "create_appointment":
-            patient_name = str(params.get("patient_name") or params.get("name") or "Pasien").strip()
-            hospital_name = str(params.get("hospital_name") or params.get("hospital") or "RS Mitra").strip()
-            doctor_name = str(params.get("doctor_name") or params.get("doctor") or "dr. Spesialis").strip()
-            appt_date = str(params.get("date") or params.get("booking_date") or "2026-10-15").strip()
-            time_slot = str(params.get("time_slot") or params.get("session_time") or "09:00 - 10:00 WIB").strip()
-            poli = str(params.get("poli") or params.get("poliklinik") or params.get("specialty") or "Poli Penyakit Dalam").strip()
-
-            target_url = f"{api_base}/api/bookings"
-            booking_payload = {
-                "patient_name": patient_name,
-                "poli": poli,
-                "hospital_name": hospital_name,
-                "doctor_name": doctor_name,
-                "booking_date": appt_date,
-                "session_time": time_slot,
-                "participant_id": str(params.get("participant_id") or params.get("bpjs_number") or params.get("number") or "")
-            }
-
-            try:
-                async with httpx.AsyncClient(timeout=6.0) as client:
-                    resp = await client.post(target_url, json=booking_payload, headers={"Accept": "application/json"})
-                    if resp.status_code == 404:
-                        # Fallback ke format legacy mock-bpjs jika ada
-                        target_url = f"{api_base}/api/v1/mock-bpjs/appointments"
-                        resp = await client.post(target_url, json=booking_payload)
-
-                    if resp.status_code in [200, 201]:
-                        data = resp.json()
-                        res_data = data.get("data", data)
-                        if isinstance(res_data, dict):
-                            res_data["_endpoint"] = target_url
-                            res_data["_source"] = "Live Web API Appointment"
-                        return res_data
-                    return {
-                        "status": "error",
-                        "error_type": "REMOTE_API_ERROR",
-                        "_endpoint": target_url,
-                        "_source": "Live Web API Appointment",
-                        "message": f"Server Web API booking mengembalikan kode status HTTP {resp.status_code}."
-                    }
-            except Exception as e:
-                return {
-                    "status": "error",
-                    "error_type": "SERVICE_UNAVAILABLE",
-                    "_endpoint": target_url,
-                    "_source": "Live Web API Appointment (Offline)",
-                    "booking_draft": booking_payload,
-                    "message": f"Server Web API booking appointment sedang offline atau tidak dapat dijangkau ({type(e).__name__}). Janji temu belum dapat dikonfirmasi ke rumah sakit."
-                }
-
-        # 10. get_appointment
-        elif tool_name == "get_appointment":
-            booking_id = str(params.get("booking_id") or params.get("id") or params.get("booking_code") or "").strip()
-            target_url = f"{api_base}/api/bookings/{booking_id}"
-            try:
-                async with httpx.AsyncClient(timeout=6.0) as client:
-                    resp = await client.get(target_url, headers={"Accept": "application/json"})
-                    if resp.status_code == 404:
-                        target_url = f"{api_base}/api/v1/mock-bpjs/appointments/{booking_id}"
-                        resp = await client.get(target_url)
-
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        res_data = data.get("data", data)
-                        if isinstance(res_data, dict):
-                            res_data["_endpoint"] = target_url
-                            res_data["_source"] = "Live Web API Appointment"
-                        return res_data
-                    return {
-                        "status": "error",
-                        "error_type": "REMOTE_API_ERROR",
-                        "_endpoint": target_url,
-                        "_source": "Live Web API Appointment",
-                        "message": f"Server Web API mengembalikan status {resp.status_code} saat mencari booking {booking_id}."
-                    }
-            except Exception as e:
-                return {
-                    "status": "error",
-                    "error_type": "SERVICE_UNAVAILABLE",
-                    "_endpoint": target_url,
-                    "_source": "Live Web API Appointment (Offline)",
-                    "booking_id": booking_id,
-                    "message": f"Server Web API appointment sedang offline ({type(e).__name__}). Data tiket booking {booking_id} tidak dapat dimuat."
-                }
-
-        return {"status": "ok", "tool": tool_name, "params": params}
+        return str(api_base or "").rstrip("/")
 
     @staticmethod
-    async def _execute_openapi_tool(tool_entry: ToolModel, params: Dict[str, Any]) -> Any:
-        schema = tool_entry.input_schema or {}
-        config = schema.get("x-openapi", {})
-        if not config.get("server_url") or not config.get("path"):
-            return {"status": "error", "message": "OpenAPI tool configuration is incomplete."}
-        locations = config.get("parameter_locations", {})
-        path = config["path"]
-        query, body = {}, None
-        for name, value in params.items():
-            location = locations.get(name, "query")
-            if location == "path":
-                path = path.replace("{" + name + "}", str(value))
-            elif location == "body":
-                body = value
-            elif location == "header":
-                continue  # credentials stay out of the registry and need a future vault integration
-            else:
-                query[name] = value
-        base = config["server_url"].rstrip("/")
-        url = base + path if path.startswith("/") else base + "/" + path
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.request(config.get("method", "GET"), url, params=query, json=body)
-                response.raise_for_status()
-                res_data = response.json() if response.content else {"status": "success"}
-                if isinstance(res_data, dict):
-                    res_data["_endpoint"] = url
-                    res_data["_source"] = f"OpenAPI ({tool_entry.name})"
-                return res_data
-        except (httpx.HTTPError, ValueError) as exc:
-            return {
-                "status": "error",
-                "_endpoint": url,
-                "_source": f"OpenAPI ({tool_entry.name})",
-                "message": f"OpenAPI request failed: {exc}"
-            }
+    async def execute_tool(db: AsyncSession, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Mengeksekusi tool secara dinamis berdasarkan metadata registrasi di database.
+        """
+        start_time = time.time()
 
+        # 1. Cari registrasi tool di database
+        result = await db.execute(select(ToolModel).where(ToolModel.name == tool_name))
+        tool_entry = result.scalar_one_or_none()
+
+        output: Any = None
+
+        # 2. Penanganan Tool Khusus: api_fetch / http_request (Generic Dynamic REST Invoker)
+        if tool_name in ("api_fetch", "http_request"):
+            url = str(params.get("url") or "").strip()
+            method = str(params.get("method") or "GET").upper()
+            dynamic_impl = {
+                "type": "http",
+                "method": method,
+                "url": url,
+                "headers": params.get("headers") or {},
+                "timeout_ms": 10000,
+            }
+            body_payload = params.get("body")
+            exec_params = body_payload if isinstance(body_payload, dict) else params
+            output = await GenericHttpExecutor.execute(dynamic_impl, exec_params, source_label=f"REST API ({method})")
+
+        # 3. Prioritas A: Tool dengan konfigurasi deklaratif eksplisit (Tool Factory buatan Builder)
+        elif tool_entry and tool_entry.implementation and tool_entry.implementation.get("type") == "http":
+            api_base = await ToolRegistryService.resolve_api_base(db, tool_entry)
+            output = await GenericHttpExecutor.execute(
+                tool_entry.implementation,
+                params,
+                api_base=api_base,
+                source_label=f"Declarative HTTP Tool ({tool_name})",
+            )
+
+        # 4. Prioritas B: Native Python Function (Kalkulator, Triase, Web Search)
+        elif NativePythonExecutor.can_handle(tool_name):
+            output = await NativePythonExecutor.execute(tool_name, params)
+
+        # 5. Prioritas C: MCP Tool Server (JSON-RPC)
+        elif tool_entry and tool_entry.source_type == "mcp" and tool_entry.mcp_server_id:
+            mcp_result = await db.execute(select(MCPServerModel).where(MCPServerModel.id == tool_entry.mcp_server_id))
+            mcp_server = mcp_result.scalar_one_or_none()
+            if not mcp_server:
+                raise ValueError(f"MCP server untuk tool '{tool_name}' tidak ditemukan.")
+            try:
+                output = await MCPClientService.call_tool(mcp_server.url, tool_name, params)
+            except Exception:
+                # Fallback ke catalog schema jika server MCP offline
+                if tool_name in CATALOG_TOOL_SCHEMAS:
+                    api_base = await ToolRegistryService.resolve_api_base(db, tool_entry)
+                    output = await GenericHttpExecutor.execute(
+                        CATALOG_TOOL_SCHEMAS[tool_name],
+                        params,
+                        api_base=api_base,
+                    )
+                else:
+                    raise
+
+        # 6. Prioritas D: OpenAPI Spec Tool
+        elif tool_entry and tool_entry.source_type == "openapi":
+            schema = tool_entry.input_schema or {}
+            config = schema.get("x-openapi", {})
+            server_url = (config.get("server_url") or "").rstrip("/")
+            path = config.get("path") or ""
+            method = (config.get("method") or "GET").upper()
+            full_url = f"{server_url}{path}"
+            openapi_impl = {
+                "type": "http",
+                "method": method,
+                "url": full_url,
+                "timeout_ms": 15000,
+            }
+            output = await GenericHttpExecutor.execute(
+                openapi_impl, params, source_label=f"OpenAPI ({tool_entry.name})"
+            )
+
+        # 7. Prioritas E: Catalog Tool Schema (Katalog umum BPJS/Faskes yang dieksekusi secara generik)
+        elif tool_name in CATALOG_TOOL_SCHEMAS:
+            api_base = await ToolRegistryService.resolve_api_base(db, tool_entry)
+            output = await GenericHttpExecutor.execute(
+                CATALOG_TOOL_SCHEMAS[tool_name],
+                params,
+                api_base=api_base,
+            )
+
+        else:
+            if not tool_entry:
+                raise ValueError(f"Tool '{tool_name}' tidak terdaftar dalam registry.")
+            raise ValueError(f"Tool '{tool_name}' tidak memiliki eksekutor yang valid.")
+
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        return {
+            "name": tool_name,
+            "params": params,
+            "result": output,
+            "duration_ms": duration_ms,
+        }

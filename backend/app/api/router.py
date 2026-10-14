@@ -6,6 +6,7 @@ from app.api.v1.agent import router as agent_router
 from app.api.v1.trace import router as trace_router
 from app.api.v1.deployment import router as deployment_router, plural_router as deployments_plural_router
 from app.api.v1.evaluation import router as evaluation_router
+from app.api.v1.knowledge import router as knowledge_router
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -17,3 +18,4 @@ api_router.include_router(agent_router)
 api_router.include_router(deployment_router)
 api_router.include_router(deployments_plural_router)
 api_router.include_router(evaluation_router)
+api_router.include_router(knowledge_router)

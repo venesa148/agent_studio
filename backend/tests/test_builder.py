@@ -52,3 +52,19 @@ async def test_builder_save_persists_spec(async_client: AsyncClient):
     agent_data = get_res.json()
     assert agent_data["name"] == "Finance & Research Agent"
 
+
+@pytest.mark.asyncio
+async def test_builder_chat_turn1_health_score(async_client: AsyncClient):
+    """Menguji Turn-1 generation, perhitungan Health Score, dan struktur spesifikasi."""
+    response = await async_client.post(
+        "/api/v1/builder/chat",
+        json={"prompt": "Buatkan bot kasir kafe kopi enak"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["is_draft"] is True
+    assert data["spec"] is not None
+    assert "Kasir" in data["spec"]["name"] or "Kafe" in data["spec"]["name"] or "Asisten" in data["spec"]["name"]
+    assert data["health_score"] >= 50
+    assert "Test Chat" in data["message"] or "aktif" in data["message"].lower()
+

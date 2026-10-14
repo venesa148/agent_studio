@@ -15,6 +15,8 @@ class AgentSpecModel(Base):
     model: Mapped[str] = mapped_column(String(100), default="gpt-4o-mini")
     tools: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)
     mcp_servers: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)
+    knowledge_sources: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON, default=list, nullable=True)
+    guardrails: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, default=dict, nullable=True)
     harness: Mapped[str] = mapped_column(String(100), default="default-safe-v1")
     status: Mapped[str] = mapped_column(String(50), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

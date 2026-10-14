@@ -10,6 +10,8 @@ class AgentSpec(BaseModel):
     model: str = "z-ai/glm-5.3"
     tools: List[str] = []
     mcp_servers: List[str] = []
+    knowledge_sources: Optional[List[Dict[str, Any]]] = []
+    guardrails: Optional[Dict[str, Any]] = None
     harness: str = "default-safe-v1"
     status: str = "active"
     created_at: Optional[datetime] = None
@@ -24,6 +26,8 @@ class AgentSpecCreate(BaseModel):
     model: str = "gpt-4o-mini"
     tools: List[str] = []
     mcp_servers: List[str] = []
+    knowledge_sources: Optional[List[Dict[str, Any]]] = []
+    guardrails: Optional[Dict[str, Any]] = None
     harness: str = "default-safe-v1"
     status: str = "active"
 
@@ -34,6 +38,8 @@ class AgentSpecUpdate(BaseModel):
     model: Optional[str] = None
     tools: Optional[List[str]] = None
     mcp_servers: Optional[List[str]] = None
+    knowledge_sources: Optional[List[Dict[str, Any]]] = None
+    guardrails: Optional[Dict[str, Any]] = None
     harness: Optional[str] = None
     status: Optional[str] = None
 
@@ -45,6 +51,8 @@ class AgentSpecResponse(BaseModel):
     model: str = "gpt-4o-mini"
     tools: List[str] = []
     mcp_servers: List[str] = []
+    knowledge_sources: Optional[List[Dict[str, Any]]] = []
+    guardrails: Optional[Dict[str, Any]] = None
     harness: str = "default-safe-v1"
     status: str = "active"
     created_at: datetime
@@ -68,6 +76,7 @@ class BuilderChatResponse(BaseModel):
     is_draft: bool = False
     new_tools: Optional[List[Dict[str, Any]]] = None
     coverage: Optional[Dict[str, Any]] = None
+    health_score: Optional[int] = 100
 
 class AgentTestRequest(BaseModel):
     agent_id: Optional[str] = None

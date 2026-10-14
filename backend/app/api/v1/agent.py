@@ -113,3 +113,33 @@ async def export_agent_yaml(agent_id: str, download: bool = False, db: AsyncSess
             headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
     return res
+
+
+from pydantic import BaseModel
+from typing import Optional
+
+class ApplyPatchRequest(BaseModel):
+    eval_id: Optional[str] = None
+    patch_text: Optional[str] = None
+
+
+@router.post("/{agent_id}/apply-patch", response_model=AgentSpecResponse)
+async def apply_patch_to_agent(agent_id: str, payload: ApplyPatchRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Human-in-the-Loop (HITL) Flywheel:
+    Menerapkan usulan perbaikan prompt/instruksi hasil evaluasi ke Agen setelah konfirmasi manusia.
+    """
+    from app.services.evaluator_service import EvaluatorService
+    updated_agent = await EvaluatorService.apply_instruction_patch(
+        db=db,
+        agent_id=agent_id,
+        eval_id=payload.eval_id,
+        patch_text=payload.patch_text
+    )
+    if not updated_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent dengan ID '{agent_id}' tidak ditemukan atau gagal menerapkan patch."
+        )
+    return AgentSpecResponse.model_validate(updated_agent)
+

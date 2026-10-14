@@ -10,7 +10,7 @@ from sqlalchemy import select, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.builder_engine import execute_http, check_guardrails
+from app.core.builder_engine import check_guardrails
 from app.models.agent import AgentSpecModel
 from app.models.chat import ConversationModel, MessageModel
 from app.models.tool import ToolModel
@@ -267,6 +267,23 @@ class AgentService:
             "5. Jika hasil tool mengindikasikan status error atau layanan tidak dapat dihubungi, jelaskan dengan jujur kepada pengguna bahwa sistem/server sumber data sedang mengalami gangguan atau offline, dan jangan membuat data fiktif!"
         )
 
+        # Injeksi RAG Grounded Context (Cohere / Sierra Knowledge Retrieval)
+        rag_context = ""
+        try:
+            from app.services.rag import VectorService
+            relevant_chunks = await VectorService.search_relevant_chunks(
+                db=db,
+                query=message_trimmed,
+                agent_id=db_agent.id if db_agent.id != "draft" else None,
+                top_k=3,
+                min_similarity=0.15
+            )
+            rag_context = VectorService.build_grounded_context(relevant_chunks)
+            if rag_context:
+                system_message += f"\n\n{rag_context}\n"
+        except Exception:
+            pass
+
         # ======================================================================
         # RESOLUSI TOOLS SECARA DINAMIS (LEVEL 2: DYNAMIC FUNCTION CALLING SCHEMA)
         # ======================================================================
@@ -294,19 +311,14 @@ class AgentService:
                     })
 
         # ======================================================================
-        # LEVEL 3: AGENT HARNESS - PRE-CHECK GUARDRAIL (SECURITY & ANTI-LEAK)
+        # LEVEL 3: AGENT HARNESS - INPUT GUARDRAIL (SECURITY, INJECTION & ANTI-LEAK)
         # ======================================================================
-        sensitive_keywords = [
-            "password", "kata sandi", "secret", "api key", "apikey",
-            "token rahasia", "kredensial", "credential", "database password",
-            "connection string", "drop table", "select * from users", "bypass guardrail"
-        ]
-        msg_lower = message_trimmed.lower()
-        matched_sensitive = [kw for kw in sensitive_keywords if kw in msg_lower]
+        from app.services.guardrails import GuardrailService
+        input_guard_res = GuardrailService.check_input_guardrail(message_trimmed)
 
-        if matched_sensitive:
+        if not input_guard_res.passed:
             # Setup working memory conversation
-            conv_title = f"test_session_{test_session_id}"
+            conv_title = f"{session_prefix}_{test_session_id}"
             conv_res = await db.execute(
                 select(ConversationModel)
                 .where(ConversationModel.title == conv_title)
@@ -326,12 +338,7 @@ class AgentService:
             )
             db.add(user_msg_db)
 
-            blocked_response = (
-                "\U0001f6e1\ufe0f **Permintaan Ditolak oleh Sistem Pengaman (Harness Guardrails)**\n\n"
-                "Pesan Anda terdeteksi mengandung permintaan terhadap data sensitif, kredensial internal, "
-                "atau kata kunci rahasia yang melanggar kebijakan keamanan sistem. "
-                "Untuk menjaga privasi dan keamanan data, permintaan ini tidak dapat diproses."
-            )
+            blocked_response = input_guard_res.interception_message
             assistant_msg_db = MessageModel(
                 conversation_id=conversation.id,
                 role="assistant",
@@ -343,12 +350,12 @@ class AgentService:
             trace_steps = [{
                 "step": 1,
                 "step_no": 1,
-                "title": "Harness Pre-Check: Security Block",
+                "title": f"Input Guardrail: {input_guard_res.reason}",
                 "type": "harness_guardrail",
-                "tool_name": "pre_check_guardrail",
-                "params": {"detected_patterns": matched_sensitive, "input_sample": message_trimmed[:60]},
-                "result": {"status": "blocked", "action": "BLOCKED_PRE_LLM", "reason": "Sensitive keyword violation"},
-                "detail": f"Pesan diblokir oleh Harness Pre-Check sebelum mencapai LLM demi keamanan (terdeteksi: {', '.join(matched_sensitive)})",
+                "tool_name": "input_guardrail",
+                "params": {"input_sample": message_trimmed[:60]},
+                "result": {"status": "blocked", "action": input_guard_res.action, "reason": input_guard_res.reason},
+                "detail": input_guard_res.detail,
                 "duration_ms": 1,
                 "status": "error"
             }]
@@ -486,7 +493,9 @@ class AgentService:
                     "tool_calls": tool_calls_payload
                 })
 
-            # Eksekusi setiap tool yang diminta oleh LLM secara dinamis
+            # Eksekusi setiap tool yang diminta oleh LLM secara dinamis dengan Pre-Tool Guardrail (Sierra Style)
+            recent_user_texts = [m.content for m in history_messages if m.role == "user"]
+
             for tc in active_tool_calls:
                 fn_name = tc.function.name
                 try:
@@ -494,42 +503,86 @@ class AgentService:
                 except Exception:
                     fn_args = {}
 
+                # 1. Resolusi Metadata Tool dari DB
+                tool_db_stmt = await db.execute(select(ToolModel).where(ToolModel.name == fn_name))
+                tool_db_obj = tool_db_stmt.scalars().first()
+                tool_effect = getattr(tool_db_obj, "effect", "read") if tool_db_obj else "read"
+
+                # 2. Pre-Tool Impact Analysis (Sierra Style)
+                pre_tool_res = GuardrailService.check_pre_tool_impact(
+                    tool_name=fn_name,
+                    tool_effect=tool_effect,
+                    agent_guardrails=getattr(db_agent, "guardrails", None),
+                    recent_user_messages=recent_user_texts,
+                    tool_params=fn_args,
+                )
+
+                if pre_tool_res.action == "BLOCK":
+                    trace_steps.append({
+                        "step": len(trace_steps) + 1,
+                        "step_no": len(trace_steps) + 1,
+                        "title": f"Pre-Tool Guardrail Block: {fn_name}",
+                        "type": "harness_guardrail",
+                        "tool_name": fn_name,
+                        "endpoint": f"internal://guardrails/{fn_name}",
+                        "source": "Security Policy Gate",
+                        "params": fn_args,
+                        "result": {"status": "blocked", "reason": pre_tool_res.reason, "detail": pre_tool_res.detail},
+                        "detail": pre_tool_res.detail,
+                        "duration_ms": 1,
+                        "status": "error"
+                    })
+                    messages_for_llm.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": json.dumps({"status": "blocked", "message": pre_tool_res.interception_message}, ensure_ascii=False)
+                    })
+                    continue
+
+                if pre_tool_res.action == "REQUIRE_CONFIRMATION":
+                    trace_steps.append({
+                        "step": len(trace_steps) + 1,
+                        "step_no": len(trace_steps) + 1,
+                        "title": f"Pre-Tool Impact Gate: Konfirmasi Diperlukan ({fn_name})",
+                        "type": "harness_confirmation_gate",
+                        "tool_name": fn_name,
+                        "endpoint": f"internal://guardrails/{fn_name}",
+                        "source": "Pre-Tool Impact Analyzer",
+                        "params": fn_args,
+                        "result": {
+                            "status": "confirmation_required",
+                            "effect": tool_effect,
+                            "reason": pre_tool_res.reason,
+                            "detail": pre_tool_res.detail,
+                        },
+                        "detail": pre_tool_res.detail,
+                        "duration_ms": 1,
+                        "status": "confirmation_required"
+                    })
+
+                    confirm_msg = pre_tool_res.interception_message or "Aksi ini memerlukan konfirmasi Anda. Ketik 'Ya, lanjutkan' untuk memproses."
+                    assistant_msg_db = MessageModel(
+                        conversation_id=conversation.id,
+                        role="assistant",
+                        content=confirm_msg
+                    )
+                    db.add(assistant_msg_db)
+                    await db.commit()
+
+                    return AgentTestResponse(
+                        agent_id=db_agent.id,
+                        agent_name=db_agent.name,
+                        response=confirm_msg,
+                        status="confirmation_required",
+                        trace_steps=trace_steps,
+                        timestamp=datetime.utcnow(),
+                    )
+
+                # 3. Eksekusi Tool melalui Unified Tool Broker jika lolos evaluasi
                 try:
-                    # Cek apakah tool memiliki konfigurasi deklaratif dari builder_engine (Tool Factory)
-                    t_spec_res = await db.execute(select(ToolModel).where(ToolModel.name == fn_name))
-                    t_spec_obj = t_spec_res.scalar_one_or_none()
-                    
-                    if t_spec_obj and t_spec_obj.implementation and t_spec_obj.implementation.get("type") == "http":
-                        # Jalankan via Safe Egress HTTP Executor (builder_agent_core)
-                        t_http_spec = {
-                            "name": t_spec_obj.name,
-                            "description": t_spec_obj.description or "",
-                            "input_schema": t_spec_obj.input_schema or {},
-                            "implementation": t_spec_obj.implementation,
-                            "effect": t_spec_obj.effect or "read"
-                        }
-                        allowed_hosts = ["*.trycloudflare.com", "trycloudflare.com", "localhost", "127.0.0.1", "*"]
-                        start_time = time.time()
-                        exec_res = execute_http(t_http_spec, fn_args, vault={}, allowed_hosts=allowed_hosts)
-                        duration_ms = int((time.time() - start_time) * 1000)
-                        
-                        if exec_res.get("ok"):
-                            tool_result = exec_res.get("data", exec_res)
-                            if isinstance(tool_result, dict):
-                                tool_result["_endpoint"] = exec_res.get("_endpoint") or t_spec_obj.implementation.get("url")
-                                tool_result["_source"] = "Declarative HTTP Executor (Core Engine)"
-                        else:
-                            endpoint_err_url = exec_res.get("_endpoint") or t_spec_obj.implementation.get("url")
-                            tool_result = {
-                                "status": "error",
-                                "message": f"Eksekusi HTTP tool gagal: {exec_res.get('error')}",
-                                "_endpoint": endpoint_err_url
-                            }
-                    else:
-                        # Fallback ke built-in / live API registry
-                        tool_exec = await ToolRegistryService.execute_tool(db, fn_name, fn_args)
-                        tool_result = tool_exec.get("result", tool_exec)
-                        duration_ms = tool_exec.get("duration_ms", 0)
+                    tool_exec = await ToolRegistryService.execute_tool(db, fn_name, fn_args)
+                    tool_result = tool_exec.get("result", tool_exec)
+                    duration_ms = tool_exec.get("duration_ms", 0)
                 except Exception as err:
                     tool_result = {"status": "error", "message": f"Eksekusi tool '{fn_name}' gagal: {str(err)}"}
                     duration_ms = 0
@@ -538,8 +591,8 @@ class AgentService:
                 endpoint_url = None
                 if isinstance(tool_result, dict) and tool_result.get("_endpoint"):
                     endpoint_url = tool_result.get("_endpoint")
-                elif t_spec_obj and t_spec_obj.implementation and isinstance(t_spec_obj.implementation, dict):
-                    endpoint_url = t_spec_obj.implementation.get("url")
+                elif tool_db_obj and tool_db_obj.implementation and isinstance(tool_db_obj.implementation, dict):
+                    endpoint_url = tool_db_obj.implementation.get("url")
 
                 source_name = "Local Service"
                 if isinstance(tool_result, dict):
@@ -592,6 +645,7 @@ class AgentService:
 
         # 2. Periksa apakah pengguna meminta eskalasi ke staf manusia (secara fleksibel)
         import re
+        msg_lower = message_trimmed.lower()
         escalation_pattern = r"(bicara|hubung|kontak|eskalasi|bantuan).*(manusia|petugas|operator|staf)|operator|staf manusia|customer service"
         if re.search(escalation_pattern, msg_lower):
             escalation_reasons.append("Pengguna meminta terhubung langsung dengan petugas/staf manusia")
@@ -621,6 +675,26 @@ class AgentService:
         response_clean = _clean_reasoning(raw_response)
         if not response_clean:
             response_clean = raw_response.strip() or "Maaf, saya tidak dapat merangkum data saat ini."
+
+        # 3. Post-Output Groundedness & Citation Verification
+        output_grounded = GuardrailService.verify_output_groundedness(
+            response_text=response_clean,
+            tool_results=trace_steps,
+            has_knowledge_context=bool(rag_context)
+        )
+        if output_grounded.get("citation_applied"):
+            trace_steps.append({
+                "step": len(trace_steps) + 1,
+                "step_no": len(trace_steps) + 1,
+                "title": "Post-Check: Grounded Citation Verified",
+                "type": "harness_groundedness",
+                "tool_name": "groundedness_checker",
+                "params": {},
+                "result": {"status": "ok", "grounded": True, "citation_applied": True},
+                "detail": "Kutipan sitasi knowledge base terverifikasi pada respon asisten.",
+                "duration_ms": 1,
+                "status": "ok"
+            })
 
         # Simpan pesan balasan asisten ke database
         assistant_msg_db = MessageModel(
