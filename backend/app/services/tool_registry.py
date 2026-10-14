@@ -109,6 +109,12 @@ class ToolRegistryService:
     async def _execute_builtin_tool(
         tool_name: str, params: Dict[str, Any], db: Optional[AsyncSession] = None, tool_entry: Optional[ToolModel] = None
     ) -> Any:
+        """
+        Eksekutor khusus untuk Built-in Sample Tools bawaan katalog showcase (contoh: rujukan faskes & direktori RS).
+        Catatan Penting: Tool eksternal, custom HTTP, OpenAPI, dan MCP yang dibuat pengguna TIDAK melalui metode ini,
+        melainkan dieksekusi secara murni deklaratif dan dinamis melalui _execute_declarative_http, _execute_openapi_tool,
+        atau MCPClientService.
+        """
         import os
         from app.core.config import settings
 
@@ -489,7 +495,9 @@ class ToolRegistryService:
                     "message": f"Gagal memanggil endpoint '{target_url}': {str(e_http)}"
                 }
 
-        # 8. classify_complaint (Clinical Triage Protocol)
+        # 8. classify_complaint (Domain-Specific Built-in Sample Tool: Healthcare Clinical Triage Protocol)
+        # Catatan Arsitektur: Tool ini merupakan contoh katalog spesifik domain medis untuk demo rujukan/triase,
+        # dan HANYA dipanggil jika agen terkait secara eksplisit mendaftarkan 'classify_complaint' dalam daftar tools-nya.
         elif tool_name == "classify_complaint":
             complaint = str(params.get("complaint") or params.get("keluhan") or "").strip()
             if not complaint:

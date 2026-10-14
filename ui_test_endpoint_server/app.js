@@ -51,9 +51,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let isSending = false;
 
   // --- 1. Inisialisasi & Persistence LocalStorage ---
-  const DEFAULT_EC2_ENDPOINT = "http://13.250.191.160:8080/agents/pandu-bpjs-sehattt/invoke";
-  const DEFAULT_LOCAL_ENDPOINT = "http://localhost:8080/agents/pandu-bpjs-sehattt/invoke";
-  const DEFAULT_TOKEN = "agy_live_7f0e5c8c0fd8daac6d720fab";
+  const DEFAULT_EC2_ENDPOINT = "http://13.250.191.160:8080/agents/custom-production-agent/invoke";
+  const DEFAULT_LOCAL_ENDPOINT = "http://localhost:8080/agents/custom-production-agent/invoke";
+  const DEFAULT_TOKEN = "agy_live_9f82a17b8c34e91204";
 
   function loadSavedConfig() {
     const savedEndpoint = localStorage.getItem("agy_tester_endpoint") || DEFAULT_EC2_ENDPOINT;

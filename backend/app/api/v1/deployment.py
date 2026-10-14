@@ -13,7 +13,11 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+from app.core.db import get_db
+from app.models.deployment import DeploymentModel
 import httpx
 
 router = APIRouter(prefix="/deployment", tags=["Deployment & Publishing"])
@@ -163,9 +167,44 @@ def normalize_and_validate_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @router.get("/status", response_model=PublishResponse)
-async def get_deployment_status():
-    """Mengambil status deployment aktif"""
+async def get_deployment_status(db: AsyncSession = Depends(get_db)):
+    """Mengambil status deployment aktif dari database atau memory fallback"""
+    try:
+        res = await db.execute(select(DeploymentModel).order_by(desc(DeploymentModel.deployedAt)).limit(1))
+        latest = res.scalar_one_or_none()
+        if latest:
+            current_deployment["agent_name"] = latest.agent
+            current_deployment["slug"] = latest.path
+            current_deployment["endpoint"] = f"{AWS_RUNTIME_URL}/agents/{latest.path}/invoke"
+            current_deployment["status"] = latest.status.lower()
+            current_deployment["access_level"] = latest.environment
+            if latest.deployedAt:
+                current_deployment["deployed_at"] = latest.deployedAt.strftime("%Y-%m-%d %H:%M:%S UTC")
+    except Exception as e:
+        print(f"[Deployment DB Warning] Error fetching latest deployment: {e}")
     return PublishResponse(**current_deployment)
+
+
+@router.get("/history")
+async def list_deployment_history(db: AsyncSession = Depends(get_db)):
+    """Mengambil daftar seluruh riwayat deployment multi-agent dari database"""
+    try:
+        res = await db.execute(select(DeploymentModel).order_by(desc(DeploymentModel.deployedAt)))
+        records = res.scalars().all()
+        return [
+            {
+                "id": r.id,
+                "agent": r.agent,
+                "environment": r.environment,
+                "path": r.path,
+                "endpoint": f"{AWS_RUNTIME_URL}/agents/{r.path}/invoke",
+                "status": r.status,
+                "deployedAt": r.deployedAt.strftime("%Y-%m-%d %H:%M:%S UTC") if r.deployedAt else "-"
+            }
+            for r in records
+        ]
+    except Exception as e:
+        return []
 
 
 @router.get("/yaml-files")
@@ -213,12 +252,13 @@ async def list_available_yaml_files():
 
 
 @router.post("/publish", response_model=PublishResponse)
-async def publish_agent(payload: PublishRequest):
+async def publish_agent(payload: PublishRequest, db: AsyncSession = Depends(get_db)):
     """
     Eksekusi Tahap Publish:
     1. Membaca & Memvalidasi agent.yaml (skema baru metadata maupun legacy)
     2. Menghubungi / Menyinkronkan ke Agent Runtime Server di AWS jika terjangkau
     3. Menerbitkan endpoint publik & API Key yang di-scope untuk agent
+    4. Menyimpan record deployment secara persisten ke database (Multi-Agent Persistence)
     """
     # 1. Muat konten YAML
     if payload.custom_yaml:
@@ -278,6 +318,20 @@ async def publish_agent(payload: PublishRequest):
     current_deployment["api_key"] = generated_key
     current_deployment["access_level"] = payload.access_level
     current_deployment["deployed_at"] = now_str
+
+    # 5. Persistensikan riwayat deployment ke database (Multi-Agent Persistence)
+    try:
+        dep_record = DeploymentModel(
+            agent=current_deployment["agent_name"],
+            environment=payload.access_level,
+            path=clean_slug,
+            status="live"
+        )
+        db.add(dep_record)
+        await db.commit()
+        await db.refresh(dep_record)
+    except Exception as dbe:
+        print(f"[Deployment DB Warning] Gagal menyimpan riwayat deployment ke DB: {dbe}")
 
     return PublishResponse(
         status="live",

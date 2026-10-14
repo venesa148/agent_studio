@@ -11,4 +11,4 @@ class DeploymentModel(Base):
     environment = Column(String(50), default="production")
     path = Column(String(255), nullable=False)
     status = Column(String(50), default="Ready")
-    deployedAt = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    deployedAt = Column(DateTime, default=datetime.utcnow)
