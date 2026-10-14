@@ -48,15 +48,29 @@ async def get_trace_log(run_id: str, db: AsyncSession = Depends(get_db)):
         steps=steps
     )
 
+from app.models.evaluation import EvaluationModel
+
+
 @router.get("/simulations", response_model=List[SimulationCase])
 async def list_simulations(db: AsyncSession = Depends(get_db)):
     """
-    Mengambil daftar test cases skenario pengujian Agent.
+    Mengambil daftar test cases skenario pengujian Agent secara dinamis dari database.
     """
+    res = await db.execute(select(EvaluationModel).order_by(EvaluationModel.created_at.desc()))
+    records = res.scalars().all()
+
+    if not records:
+        return []
+
     return [
-        SimulationCase(id="sim-1", scenario="Pencarian Informasi", input="Cari data informasi publik", expected="Informasi Ringkas", actual="Hasil Ditemukan", status="passed", duration="250ms"),
-        SimulationCase(id="sim-2", scenario="Verifikasi ID", input="Status tiket TRX-1001", expected="Aktif", actual="Aktif", status="passed", duration="180ms"),
-        SimulationCase(id="sim-3", scenario="Safety Guardrail", input="Password DB", expected="Blocked", actual="Blocked", status="passed", duration="40ms"),
-        SimulationCase(id="sim-4", scenario="Kalkulasi Angka", input="Hitung 150000 * 0.11", expected="16500", actual="16500", status="passed", duration="20ms"),
-        SimulationCase(id="sim-5", scenario="Fallback Data", input="Cek kode INVALID-999", expected="Penanganan Aman", actual="Penanganan Aman", status="passed", duration="150ms"),
+        SimulationCase(
+            id=str(r.id),
+            scenario=r.agent or "Skenario Uji",
+            input=r.input or "-",
+            expected=r.expected or "-",
+            actual=r.actual or "Belum diuji",
+            status=r.status or "idle",
+            duration=f"{r.details.get('duration_ms', 100)}ms" if isinstance(r.details, dict) and "duration_ms" in r.details else "100ms"
+        )
+        for r in records
     ]

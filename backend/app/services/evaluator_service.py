@@ -176,9 +176,9 @@ class EvaluatorService:
         if not actual_response.strip():
             fact_score = 20
         else:
-            # Evaluasi kesesuaian jika ada expected_output
-            if expected_output and expected_output.strip():
-                exp_words = set(w for w in expected_output.lower().split() if len(w) > 3)
+            # Evaluasi kesesuaian jika ada expected
+            if expected and expected.strip():
+                exp_words = set(w for w in expected.lower().split() if len(w) > 3)
                 act_words = set(w for w in resp_lower.split() if len(w) > 3)
                 if exp_words:
                     overlap_ratio = len(exp_words.intersection(act_words)) / len(exp_words)
