@@ -12,6 +12,8 @@ export interface AgentDraft {
   model: string;
   tools: string[];
   mcp_servers: string[];
+  knowledge_sources?: any[];
+  guardrails?: any;
   harness: string;
   status: "draft";
   messages: any[]; // Seluruh riwayat percakapan dengan builder

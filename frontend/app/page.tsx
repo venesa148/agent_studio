@@ -7,7 +7,7 @@ import { ConfigureNav, ConfigureTab } from "@/components/navigation/ConfigureNav
 import { ConfigurePanes } from "@/features/builder/ConfigurePanes";
 import { BuildAgentChatPane } from "@/features/builder/BuildAgentChatPane";
 import { TestAgentPane } from "@/features/chat/TestAgentPane";
-import { getDraftById } from "@/lib/draftStore";
+import { getDraftById, saveDraft } from "@/lib/draftStore";
 
 export interface AgentSpecData {
   id: string;
@@ -17,6 +17,8 @@ export interface AgentSpecData {
   model: string;
   tools: string[];
   mcp_servers: string[];
+  knowledge_sources?: any[];
+  guardrails?: any;
   harness: string;
   status: string;
   created_at?: string;
@@ -68,6 +70,8 @@ function HomePageContent() {
             model: draft.model,
             tools: draft.tools,
             mcp_servers: draft.mcp_servers,
+            knowledge_sources: draft.knowledge_sources || [],
+            guardrails: draft.guardrails || null,
             harness: draft.harness,
             status: "draft",
             created_at: draft.created_at,
@@ -98,6 +102,8 @@ function HomePageContent() {
           model: draft.model,
           tools: draft.tools,
           mcp_servers: draft.mcp_servers,
+          knowledge_sources: draft.knowledge_sources || [],
+          guardrails: draft.guardrails || null,
           harness: draft.harness,
           status: "draft",
           created_at: draft.created_at,
@@ -116,6 +122,8 @@ function HomePageContent() {
 
   const handleAgentCreatedOrUpdated = (agent: AgentSpecData) => {
     const isPersisted = Boolean(agent.id && !agent.id.startsWith("draft_") && agent.status !== "draft");
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+
     if (isPersisted) {
       setAgents((prev) => {
         const idx = prev.findIndex((a) => a.id === agent.id);
@@ -129,6 +137,24 @@ function HomePageContent() {
       if (typeof window !== "undefined") {
         window.history.pushState({}, "", `/?id=${agent.id}`);
       }
+
+      // Sync ke backend database
+      fetch(`${apiUrl}/api/v1/agent/${agent.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: agent.name,
+          description: agent.description,
+          instructions: agent.instructions,
+          model: agent.model,
+          tools: agent.tools,
+          mcp_servers: agent.mcp_servers,
+          knowledge_sources: agent.knowledge_sources,
+          guardrails: agent.guardrails,
+          harness: agent.harness,
+          status: agent.status,
+        }),
+      }).catch((err) => console.warn("Failed to persist agent update to DB:", err));
     } else {
       if (!agent.id) {
         agent.id = `draft_${Date.now()}`;
@@ -136,6 +162,21 @@ function HomePageContent() {
       if (typeof window !== "undefined" && !window.location.search.includes("id=")) {
         window.history.replaceState({}, "", `/?draft_id=${agent.id}`);
       }
+      // Simpan draf ke localStorage
+      saveDraft({
+        id: agent.id,
+        name: agent.name,
+        description: agent.description,
+        instructions: agent.instructions,
+        model: agent.model,
+        tools: agent.tools,
+        mcp_servers: agent.mcp_servers,
+        knowledge_sources: agent.knowledge_sources,
+        guardrails: agent.guardrails,
+        harness: agent.harness,
+        status: "draft",
+        messages: [],
+      });
     }
     setActiveAgent({ ...agent });
   };

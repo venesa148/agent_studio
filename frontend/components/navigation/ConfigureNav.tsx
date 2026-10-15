@@ -37,13 +37,29 @@ export function ConfigureNav({
 }: ConfigureNavProps) {
   // Hitung jumlah dinamis berdasarkan activeAgent saat ini
   const toolsCount = activeAgent?.tools ? activeAgent.tools.length : 0;
-  const knowledgeCount = (activeAgent as any)?.knowledge?.length || 2;
-  const journeysCount = (activeAgent as any)?.tests?.length || 2;
+  const knowledgeCount = activeAgent?.knowledge_sources ? activeAgent.knowledge_sources.length : ((activeAgent as any)?.knowledge?.length || 0);
+  const journeysCount = (activeAgent as any)?.tests?.length || 0;
+  
+  // Guardrails dinamis dari DB
+  const guardrailsConfig = activeAgent?.guardrails || null;
+  const guardrailsCount = guardrailsConfig
+    ? [
+        guardrailsConfig.topic_block,
+        guardrailsConfig.pii_mask,
+        guardrailsConfig.mutation_confirm,
+        guardrailsConfig.human_handoff,
+      ].filter(Boolean).length
+    : 0;
+
+  // Model & Limits dinamis dari DB
   const modelShortName = activeAgent?.model
     ? activeAgent.model.includes("/")
       ? activeAgent.model.split("/")[1]
       : activeAgent.model
     : "GLM 5.3";
+
+  const maxCallsValue = activeAgent?.guardrails?.max_calls || 5;
+  const limitsBadgeText = `${maxCallsValue} Calls`;
 
   const items: {
     id: ConfigureTab;
@@ -79,7 +95,7 @@ export function ConfigureNav({
       id: "guardrails",
       label: "Guardrails",
       icon: ShieldCheck,
-      count: 4,
+      count: guardrailsCount,
     },
     {
       id: "model",
@@ -91,7 +107,7 @@ export function ConfigureNav({
       id: "limits",
       label: "Limits",
       icon: SlidersHorizontal,
-      badgeText: "5 Calls",
+      badgeText: limitsBadgeText,
     },
   ];
 
