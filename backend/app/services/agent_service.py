@@ -150,7 +150,7 @@ class AgentService:
             raise RuntimeError("API Key LLM belum dikonfigurasi. Silakan paste OPENROUTER_API_KEY atau LLM_API_KEY di file .env backend.")
 
         # Tentukan nama model (default ke settings.LLM_MODEL atau model spesifik agent)
-        model = settings.LLM_MODEL or "z-ai/glm-5.3-flash"
+        model = settings.LLM_MODEL or "openrouter/free"
         if agent.model and agent.model.strip() and agent.model.strip() not in ["default", ""]:
             model = agent.model.strip()
 
@@ -414,11 +414,12 @@ class AgentService:
         max_iterations = 6
 
         for iteration in range(max_iterations):
+            agent_max_tokens = getattr(settings, "AGENT_MAX_TOKENS", 1500)
             call_kwargs: Dict[str, Any] = {
                 "model": model,
                 "messages": messages_for_llm,
                 "temperature": 0.7,
-                "max_tokens": 2500,
+                "max_tokens": agent_max_tokens,
             }
             if openai_tools:
                 call_kwargs["tools"] = openai_tools
@@ -426,7 +427,38 @@ class AgentService:
             try:
                 completion = await client.chat.completions.create(**call_kwargs)
             except Exception as exc:
-                raise RuntimeError(f"LLM gagal memproses pesan untuk agent '{db_agent.name}': {exc}") from exc
+                fallback_model = getattr(settings, "LLM_FALLBACK_MODEL", "liquid/lfm-2.5-2.6b:free")
+                call_succeeded = False
+                if ("402" in str(exc) or "credits" in str(exc).lower() or "fewer max_tokens" in str(exc).lower() or "429" in str(exc) or "rate limit" in str(exc).lower()) and call_kwargs["model"] != fallback_model:
+                    logger.warning(f"[AgentService] Model {call_kwargs['model']} gagal ({exc}). Mencoba fallback ke '{fallback_model}'...")
+                    call_kwargs["model"] = fallback_model
+                    try:
+                        completion = await client.chat.completions.create(**call_kwargs)
+                        call_succeeded = True
+                    except Exception as second_exc:
+                        exc = second_exc
+
+                if not call_succeeded:
+                    logger.warning(f"[AgentService] Seluruh provider LLM eksternal tidak tersedia ({exc}). Mengaktifkan Local Retrieval Engine...")
+                    user_query = user_message.content or ""
+                    target_aid = db_agent.id if (db_agent.id and not str(db_agent.id).startswith("draft_")) else None
+                    similar_chunks = await VectorService.search_similar_chunks(db, query=user_query, agent_id=target_aid, limit=3)
+                    if not similar_chunks and target_aid is not None:
+                        similar_chunks = await VectorService.search_similar_chunks(db, query=user_query, agent_id=None, limit=3)
+
+                    if similar_chunks:
+                        context_texts = "\n\n".join([c.content for c in similar_chunks if c.content])
+                        raw_response = (
+                            f"Berdasarkan informasi resmi yang tercatat di Knowledge Base:\n\n"
+                            f"{context_texts[:750]}\n\n"
+                            f"*(Asistensi Knowledge Base aktif)*"
+                        )
+                    else:
+                        raw_response = (
+                            f"Halo! Saya **{db_agent.name}**. Permintaan Anda telah kami catat. "
+                            f"Saat ini kuota provider LLM eksternal sedang dalam batas harian. Agen siap melayani pertanyaan operasional berdasarkan dokumen resmi yang terhubung."
+                        )
+                    break
 
             choice = completion.choices[0]
             msg = choice.message
@@ -467,6 +499,8 @@ class AgentService:
             # Jika LLM tidak meminta pemanggilan tool, kita sudah mendapatkan jawaban akhir!
             if not active_tool_calls:
                 raw_response = msg.content or ""
+                if not raw_response.strip() and hasattr(msg, "reasoning") and msg.reasoning:
+                    raw_response = msg.reasoning
                 break
 
             # Jika LLM meminta pemanggilan tool (Function Calling)

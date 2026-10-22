@@ -17,6 +17,7 @@ from app.api.router import api_router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app.main")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing Database tables...")

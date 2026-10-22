@@ -1,17 +1,70 @@
 spec_version: v1.0
 metadata:
-  id: b717c87b-31bb-4585-8b76-7d576b00b21b
+  id: 5a3ca13c-1911-4eca-9614-93bc0f320b97
   name: Finance & Research Agent
   slug: finance_research_agent
   description: Agent riset pasar dan kalkulasi keuangan
   status: active
-  created_at: '2026-10-08T04:53:10.903492'
-  updated_at: '2026-10-08T04:53:10.903492'
+  created_at: '2026-10-15T10:26:19.821092'
+  updated_at: '2026-10-15T10:26:19.821092'
 configuration:
-  model: z-ai/glm-5.3
+  model: cohere/north-mini-code:free
   harness: default-safe-v1
 tools:
 - calculator
 - search_web
 mcp_servers: []
 instructions: Bantu pengguna melakukan riset web dan menghitung perkiraan.
+flow:
+  entry_node: main_step
+  nodes:
+  - id: main_step
+    type: llm_step
+    instruction: Tanggapi dan bantu kebutuhan pengguna dengan memanfaatkan tools yang
+      relevan secara akurat sesuai instruksi.
+    next: selesai
+  - id: selesai
+    type: end
+tools_required:
+- tool_ref: calculator
+  tool_name: calculator
+  purpose: Evaluasi perhitungan matematika dan kalkulasi angka
+  source_type: builtin
+  mcp_server_name: null
+  endpoint: internal://calc/eval
+  method: INTERNAL
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      expression:
+        type: string
+        description: 'Ekspresi matematika yang ingin dihitung, contoh: ''25 * 4'',
+          ''150000 * 0.11'', ''(12 + 8) / 2'''
+    required:
+    - expression
+- tool_ref: search_web
+  tool_name: search_web
+  purpose: Pencarian web real-time untuk informasi publik
+  source_type: builtin
+  mcp_server_name: null
+  endpoint: https://duckduckgo.com
+  method: GET
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+        description: Kata kunci pencarian web secara real-time
+    required:
+    - query
+guardrails:
+  max_turns: 15
+  strict_grounding: true
+  disallowed_behaviors:
+  - mengarang informasi atau data fiktif di luar konteks (anti-halusinasi)
+  - membocorkan kredensial, API key, atau data privasi pengguna
+  - menjalankan aksi berisiko atau eksekusi tool tanpa persetujuan eksplisit

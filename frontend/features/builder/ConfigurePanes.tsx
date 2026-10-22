@@ -23,6 +23,8 @@ import {
   Sliders,
   ChevronRight,
   UserCheck,
+  Save,
+  Database,
 } from "lucide-react";
 import { AgentSpecData } from "@/app/page";
 
@@ -73,7 +75,8 @@ export function ConfigurePanes({
     const fetchTools = async () => {
       try {
         setIsLoadingTools(true);
-        const res = await fetch(`${apiUrl}/api/v1/tools`);
+        const query = activeAgent?.id ? `?agent_id=${activeAgent.id}` : "";
+        const res = await fetch(`${apiUrl}/api/v1/tools${query}`);
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data)) setAllDbTools(data);
@@ -85,7 +88,7 @@ export function ConfigurePanes({
       }
     };
     fetchTools();
-  }, [apiUrl]);
+  }, [apiUrl, activeAgent?.id]);
 
   useEffect(() => {
     if (activeAgent?.guardrails) {
@@ -124,12 +127,20 @@ export function ConfigurePanes({
       ...currentGuardrails,
       [key]: value,
     };
-    if (activeAgent) {
-      onUpdateAgent({
-        ...activeAgent,
-        guardrails: updated,
-      });
-    }
+    const baseAgent: AgentSpecData = activeAgent || {
+      id: `draft_${Date.now()}`,
+      name: "Agent Baru",
+      status: "draft",
+      model: selectedModel || "z-ai/glm-5.3",
+      tools: [],
+      mcp_servers: [],
+      harness: "default-safe-v1",
+      guardrails: currentGuardrails,
+    };
+    onUpdateAgent({
+      ...baseAgent,
+      guardrails: updated,
+    });
   };
 
   // Fetch knowledge documents from DB or agent spec
@@ -203,16 +214,30 @@ export function ConfigurePanes({
   };
 
   const handleToggleTool = (toolName: string) => {
-    if (!activeAgent) {
-      triggerToast("Pilih atau buat agent terlebih dahulu.");
-      return;
-    }
-    const currentTools = activeAgent.tools || [];
+    const baseAgent: AgentSpecData = activeAgent || {
+      id: `draft_${Date.now()}`,
+      name: "Agent Baru",
+      status: "draft",
+      model: selectedModel || "z-ai/glm-5.3",
+      tools: [],
+      mcp_servers: [],
+      harness: "default-safe-v1",
+      guardrails: {
+        topic_block: topicBlock,
+        pii_mask: piiMask,
+        mutation_confirm: mutationConfirm,
+        human_handoff: humanHandoff,
+        max_calls: maxCalls,
+        timeout_sec: timeoutSec,
+        temperature: temperature,
+      },
+    };
+    const currentTools = baseAgent.tools || [];
     const updatedTools = currentTools.includes(toolName)
       ? currentTools.filter((t) => t !== toolName)
       : [...currentTools, toolName];
 
-    const updated = { ...activeAgent, tools: updatedTools };
+    const updated = { ...baseAgent, tools: updatedTools };
     onUpdateAgent(updated);
     triggerToast(
       currentTools.includes(toolName)
@@ -239,9 +264,81 @@ export function ConfigurePanes({
 
   const handleSaveModel = (newModel: string) => {
     setSelectedModel(newModel);
-    if (activeAgent) {
-      onUpdateAgent({ ...activeAgent, model: newModel });
-      triggerToast(`Model diubah ke ${newModel}`);
+    const baseAgent: AgentSpecData = activeAgent || {
+      id: `draft_${Date.now()}`,
+      name: "Agent Baru",
+      status: "draft",
+      model: newModel,
+      tools: [],
+      mcp_servers: [],
+      harness: "default-safe-v1",
+      guardrails: {
+        topic_block: topicBlock,
+        pii_mask: piiMask,
+        mutation_confirm: mutationConfirm,
+        human_handoff: humanHandoff,
+        max_calls: maxCalls,
+        timeout_sec: timeoutSec,
+        temperature: temperature,
+      },
+    };
+    onUpdateAgent({ ...baseAgent, model: newModel });
+    triggerToast(`Model diubah ke ${newModel}`);
+  };
+
+  const [isSavingToDb, setIsSavingToDb] = useState(false);
+
+  const handleSaveToDatabase = async () => {
+    try {
+      setIsSavingToDb(true);
+      const isExistingDbAgent = Boolean(activeAgent?.id && !activeAgent.id.startsWith("draft_"));
+      const payload = {
+        name: activeAgent?.name || "Agent Baru",
+        description: activeAgent?.description || "Agen kustom dari Agent Studio",
+        instructions: activeAgent?.instructions || "Anda adalah asisten AI yang cerdas dan patuh aturan.",
+        model: selectedModel || activeAgent?.model || "z-ai/glm-5.3",
+        tools: activeAgent?.tools || [],
+        mcp_servers: activeAgent?.mcp_servers || [],
+        knowledge_sources: activeAgent?.knowledge_sources || [],
+        guardrails: {
+          topic_block: topicBlock,
+          pii_mask: piiMask,
+          mutation_confirm: mutationConfirm,
+          human_handoff: humanHandoff,
+          max_calls: maxCalls,
+          timeout_sec: timeoutSec,
+          temperature: temperature,
+        },
+        harness: activeAgent?.harness || "default-safe-v1",
+        status: "active",
+      };
+
+      const url = isExistingDbAgent
+        ? `${apiUrl}/api/v1/agent/${activeAgent?.id}`
+        : `${apiUrl}/api/v1/agent`;
+      const method = isExistingDbAgent ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        throw new Error("Gagal menyimpan ke database");
+      }
+
+      const saved: AgentSpecData = await res.json();
+      onUpdateAgent(saved);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("agent_updated"));
+      }
+      triggerToast(`✓ Berhasil disimpan ke database Supabase! (ID: ${saved.id.slice(0, 8)}...)`);
+    } catch (e: any) {
+      console.error(e);
+      triggerToast("Gagal menyimpan agen ke database.");
+    } finally {
+      setIsSavingToDb(false);
     }
   };
 
@@ -281,6 +378,42 @@ export function ConfigurePanes({
           <span>{saveToast}</span>
         </div>
       )}
+
+      {/* Top Action Bar: Status & Save to Database */}
+      <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-6 py-2.5 flex items-center justify-between shrink-0 shadow-2xs">
+        <div className="flex items-center gap-2.5">
+          <span className="text-xs font-bold text-slate-800">
+            {activeAgent?.name || "Agent Baru"}
+          </span>
+          <span
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+              activeAgent?.id && !activeAgent.id.startsWith("draft_")
+                ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                : "bg-amber-100 text-amber-800 border border-amber-200"
+            }`}
+          >
+            {activeAgent?.id && !activeAgent.id.startsWith("draft_")
+              ? "● Tersimpan di DB"
+              : "○ Draf Belum Disimpan"}
+          </span>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSaveToDatabase}
+          disabled={isSavingToDb}
+          className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+        >
+          {isSavingToDb ? (
+            <span>Menyimpan ke DB...</span>
+          ) : (
+            <>
+              <Save className="w-3.5 h-3.5" />
+              <span>Simpan ke Database</span>
+            </>
+          )}
+        </button>
+      </div>
 
       {/* 1. TAB: TOOLS */}
       {activeTab === "tools" && (

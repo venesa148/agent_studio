@@ -362,17 +362,18 @@ export function BuildAgentChatPane({
 
       // Simpan ke DRAFT STORE jika berstatus draft / belum disimpan di database
       if (data.is_draft !== false || !data.spec?.id) {
-        if (!currentDraftIdRef.current) {
-          currentDraftIdRef.current = `draft_${Date.now()}`;
-        }
+        const agentDraftId = data.spec?.id || currentDraftIdRef.current || `draft_${Date.now()}`;
+        currentDraftIdRef.current = agentDraftId;
         const savedDraft = saveDraft({
-          id: currentDraftIdRef.current,
+          id: agentDraftId,
           name: data.spec?.name || "Draf Agen Baru",
           description: data.spec?.description || "",
           instructions: data.spec?.instructions || "",
           model: data.spec?.model || "z-ai/glm-5.3",
           tools: data.spec?.tools || [],
           mcp_servers: data.spec?.mcp_servers || [],
+          knowledge_sources: data.spec?.knowledge_sources || [],
+          guardrails: data.spec?.guardrails || null,
           harness: data.spec?.harness || "default-safe-v1",
           messages: newMessages,
         });
@@ -391,9 +392,12 @@ export function BuildAgentChatPane({
             model: data.spec.model || "z-ai/glm-5.3",
             tools: data.spec.tools || [],
             mcp_servers: data.spec.mcp_servers || [],
+            knowledge_sources: data.spec.knowledge_sources || [],
+            guardrails: data.spec.guardrails || null,
             harness: data.spec.harness || "default-safe-v1",
             status: "draft",
           };
+          (draftForTesting as any).messages = newMessages;
           onAgentCreated?.(draftForTesting);
         }
       }

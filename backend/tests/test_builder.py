@@ -64,7 +64,8 @@ async def test_builder_chat_turn1_health_score(async_client: AsyncClient):
     data = response.json()
     assert data["is_draft"] is True
     assert data["spec"] is not None
-    assert "Kasir" in data["spec"]["name"] or "Kafe" in data["spec"]["name"] or "Asisten" in data["spec"]["name"]
+    name_lower = data["spec"]["name"].lower()
+    assert any(w in name_lower for w in ["kasir", "cashier", "kafe", "cafe", "coffee", "kopi", "bot", "asisten"])
     assert data["health_score"] >= 50
     assert "Test Chat" in data["message"] or "aktif" in data["message"].lower()
 

@@ -1,0 +1,163 @@
+spec_version: v1.0
+metadata:
+  id: 87a3c01f-bdeb-4aad-931f-d3ecad9e9f03
+  name: Asisten Cuti
+  slug: asisten_cuti
+  description: Menjawab pertanyaan karyawan tetap OT Maju Jaya (semua divisi) tentang
+    saldo cuti tahunan pribadi, status pengajuan cuti, dan aturan cuti perusahaan
+    melalui chat di portal internal, agar karyawan tidak perlu bertanya langsung ke
+    HR.
+  status: draft
+  created_at: '2026-10-12T12:24:12.789562'
+  updated_at: '2026-10-12T12:24:12.789562'
+configuration:
+  model: z-ai/glm-5.3-flash
+  harness: default-safe-v1
+tools:
+- check_leave_balance
+- get_leave_request_status
+- submit_leave_request
+- cancel_leave_request
+- api_fetch
+mcp_servers: []
+instructions: |-
+  Kamu adalah 'Asisten Cuti', asisten virtual internal perusahaan OT Maju Jaya. PERAN: Membantu karyawan tetap dari seluruh divisi memeriksa saldo cuti tahunan mereka sendiri, memantau status pengajuan cuti, mengajukan cuti baru, dan membatalkan pengajuan cuti atas nama mereka. PENGGUNA: Hanya karyawan internal via chat portal internal; tolak layani pihak luar/non-karyawan. LINGKUPAN: Fokus hanya pada topik cuti; arahkan topik di luar itu ke kanal yang sesuai. GAYA BAHASA: Ramah, profesional, singkat, dan mudah dipahami dalam Bahasa Indonesia. SOP AKSI TULIS (WAJIB): Sebelum memanggil submit_leave_request atau cancel_leave_request, tampilkan ringkasan aksi (jenis cuti, tanggal, jumlah hari) dan minta konfirmasi eksplisit 'ya' dari karyawan; tanpa konfirmasi, JANGAN eksekusi. FALLBACK: Jika data karyawan tidak ditemukan atau sistem data gagal diakses, minta karyawan memverifikasi identitas/ID karyawan atau menyarankan menghubungi HR. BATASAN: Boleh membaca data cuti dan melakukan aksi mutasi data (mengajukan/membatalkan cuti) HANYA atas nama karyawan yang sedang berinteraksi dan HANYA setelah konfirmasi eksplisit. Sumber data: sistem cuti perusahaan via API https://constructed-qld-purchase-afternoon.trycloudflare.com/.
+
+  jadi apakah saya sudah bisa pakai agent cuti ini? atau masih belum bisa saya pakai dan apakah sudah terhubung dengan URL yang saya berikan
+flow:
+  entry_node: main_step
+  nodes:
+  - id: main_step
+    type: llm_step
+    instruction: Tanggapi dan bantu kebutuhan pengguna dengan memanfaatkan tools yang
+      relevan secara akurat sesuai instruksi.
+    next: selesai
+  - id: selesai
+    type: end
+tools_required:
+- tool_ref: check_leave_balance
+  tool_name: check_leave_balance
+  purpose: Dipanggil saat karyawan bertanya tentang sisa saldo cuti tahunan mereka.
+    Mengambil data saldo cuti (hak, terpakai, tersisa) dari sistem HR perusahaan berdasarkan
+    ID karyawan.
+  source_type: http
+  mcp_server_name: null
+  endpoint: https://constructed-qld-purchase-afternoon.trycloudflare.com/leave/balance
+  method: GET
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      employee_id:
+        type: string
+        description: ID karyawan yang sedang bertanya
+    required:
+    - employee_id
+- tool_ref: get_leave_request_status
+  tool_name: get_leave_request_status
+  purpose: 'Dipanggil saat karyawan ingin memantau status pengajuan cuti mereka (misal:
+    menunggu persetujuan, disetujui, ditolak). Mengambil daftar dan status pengajuan
+    cuti dari sistem HR perusahaan.'
+  source_type: http
+  mcp_server_name: null
+  endpoint: https://constructed-qld-purchase-afternoon.trycloudflare.com/leave/requests
+  method: GET
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      employee_id:
+        type: string
+        description: ID karyawan pemilik pengajuan
+    required:
+    - employee_id
+- tool_ref: submit_leave_request
+  tool_name: submit_leave_request
+  purpose: Dipanggil untuk mengajukan cuti baru atas nama karyawan HANYA setelah karyawan
+    memberikan konfirmasi eksplisit 'ya' atas ringkasan pengajuan yang ditampilkan
+    agent. Mengirim data pengajuan cuti ke sistem HR perusahaan.
+  source_type: http
+  mcp_server_name: null
+  endpoint: https://constructed-qld-purchase-afternoon.trycloudflare.com/leave/requests
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      employee_id:
+        type: string
+        description: ID karyawan yang mengajukan cuti
+      leave_type:
+        type: string
+        description: 'Jenis cuti, misal: tahunan, sakit, izin'
+      start_date:
+        type: string
+        description: Tanggal mulai cuti (format YYYY-MM-DD)
+      end_date:
+        type: string
+        description: Tanggal selesai cuti (format YYYY-MM-DD)
+      reason:
+        type: string
+        description: Alasan/keterangan cuti (opsional)
+    required:
+    - employee_id
+    - leave_type
+    - start_date
+    - end_date
+- tool_ref: cancel_leave_request
+  tool_name: cancel_leave_request
+  purpose: Dipanggil untuk membatalkan pengajuan cuti yang sudah ada atas nama karyawan
+    HANYA setelah karyawan memberikan konfirmasi eksplisit 'ya'. Mengirim permintaan
+    pembatalan ke sistem HR perusahaan berdasarkan ID pengajuan.
+  source_type: http
+  mcp_server_name: null
+  endpoint: https://constructed-qld-purchase-afternoon.trycloudflare.com/leave/requests/cancel
+  method: POST
+  connection_status: connected
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      employee_id:
+        type: string
+        description: ID karyawan pemilik pengajuan
+      request_id:
+        type: string
+        description: ID pengajuan cuti yang akan dibatalkan
+    required:
+    - employee_id
+    - request_id
+- tool_ref: api_fetch
+  tool_name: api_fetch
+  purpose: Panggil REST API publik melalui HTTP GET atau POST
+  source_type: builtin
+  mcp_server_name: null
+  endpoint: null
+  method: POST
+  connection_status: unconfigured
+  auth_secret_ref: null
+  input_schema:
+    type: object
+    properties:
+      url:
+        type: string
+        description: URL endpoint REST API publik yang ingin di-request
+      method:
+        type: string
+        enum:
+        - GET
+        - POST
+        description: HTTP method yang digunakan (GET atau POST)
+        default: GET
+    required:
+    - url
+guardrails:
+  max_turns: 15
+  strict_grounding: true
+  disallowed_behaviors:
+  - memberi diagnosis pasti tanpa dokter
+  - merekomendasikan obat atau dosis spesifik
+  - mengabaikan keluhan yang mengindikasikan kondisi darurat

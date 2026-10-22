@@ -25,12 +25,13 @@ logger = logging.getLogger("api_knowledge")
 router = APIRouter(prefix="/knowledge", tags=["Knowledge & RAG Engine"], dependencies=[Depends(verify_api_key)])
 
 
+@router.get("", response_model=List[KnowledgeDocumentResponse])
 @router.get("/documents", response_model=List[KnowledgeDocumentResponse])
 async def list_documents(
     agent_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Mengambil daftar seluruh dokumen yang tersimpan di Knowledge Base."""
+    """Mengambil daftar seluruh dokumen yang tersimpan di Knowledge Base (mendukung ?agent_id=...)."""
     stmt = select(KnowledgeDocumentModel).order_by(KnowledgeDocumentModel.created_at.desc())
     if agent_id:
         stmt = stmt.where((KnowledgeDocumentModel.agent_id == agent_id) | (KnowledgeDocumentModel.agent_id.is_(None)))

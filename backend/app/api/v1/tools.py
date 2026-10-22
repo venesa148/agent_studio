@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
+from typing import List, Optional
 from app.core.db import get_db
 from app.core.security import verify_api_key
 from app.schemas.tool import ToolResponse, ToolRegisterRequest, OpenAPIImportRequest
@@ -12,11 +12,18 @@ from app.services.openapi_importer import OpenAPIImporter
 router = APIRouter(prefix="/tools", tags=["Tools Registry"], dependencies=[Depends(verify_api_key)])
 
 @router.get("", response_model=List[ToolResponse])
-async def list_tools(db: AsyncSession = Depends(get_db)):
+async def list_tools(agent_id: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     """
     Mengambil daftar seluruh tools yang terdaftar pada registry allowlist.
+    Jika agent_id diberikan, tools yang terikat dengan agent ini diprioritaskan.
     """
     tools = await ToolRegistryService.get_all_tools(db)
+    if agent_id:
+        tools.sort(
+            key=lambda t: 0
+            if (t.used_by and agent_id in t.used_by)
+            else (1 if t.used_by == "All agents" else 2)
+        )
     return [
         ToolResponse(
             id=t.id,

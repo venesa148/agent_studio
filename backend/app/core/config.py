@@ -25,9 +25,12 @@ class Settings(BaseSettings):
     # LLM / OpenRouter Provider Configuration
     OPENROUTER_API_KEY: str = ""
     LLM_BASE_URL: str = "https://openrouter.ai/api/v1"
-    LLM_MODEL: str = "z-ai/glm-5.3"
+    LLM_MODEL: str = "openrouter/free"
+    LLM_FALLBACK_MODEL: str = "openrouter/free"
     LLM_API_KEY: str = ""
     EVALUATOR_MODEL: str = "x-ai/grok-4.6"
+    BUILDER_MAX_TOKENS: int = 1500
+    AGENT_MAX_TOKENS: int = 1500
 
     EXTERNAL_MOCK_API_URL: str = "https://golden-funny-scientific-undefined.trycloudflare.com"
     API_KEY_SECRET: str = "agent_studio_secret_key_2026"

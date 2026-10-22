@@ -162,7 +162,12 @@ function HomePageContent() {
       if (typeof window !== "undefined" && !window.location.search.includes("id=")) {
         window.history.replaceState({}, "", `/?draft_id=${agent.id}`);
       }
-      // Simpan draf ke localStorage
+      // Simpan draf ke localStorage tanpa menghapus riwayat pesan chat
+      const existingDraft = getDraftById(agent.id);
+      const messagesToKeep = Array.isArray((agent as any).messages) && (agent as any).messages.length > 0
+        ? (agent as any).messages
+        : (existingDraft?.messages || []);
+
       saveDraft({
         id: agent.id,
         name: agent.name,
@@ -175,7 +180,7 @@ function HomePageContent() {
         guardrails: agent.guardrails,
         harness: agent.harness,
         status: "draft",
-        messages: [],
+        messages: messagesToKeep,
       });
     }
     setActiveAgent({ ...agent });

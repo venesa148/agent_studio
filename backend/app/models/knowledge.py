@@ -1,9 +1,29 @@
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from sqlalchemy import String, Text, DateTime, ForeignKey, Integer, JSON
+from sqlalchemy import String, Text, DateTime, ForeignKey, Integer, JSON, TypeDecorator
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
+
+try:
+    from pgvector.sqlalchemy import Vector
+except ImportError:
+    Vector = None
+
+
+class VectorType(TypeDecorator):
+    """
+    Universal Vector type:
+    - On PostgreSQL with pgvector: maps to VECTOR(1536)
+    - On SQLite/fallback: maps to JSON
+    """
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql" and Vector is not None:
+            return dialect.type_descriptor(Vector(1536))
+        return dialect.type_descriptor(JSON())
 
 
 class KnowledgeDocumentModel(Base):
@@ -33,8 +53,8 @@ class KnowledgeChunkModel(Base):
     agent_id: Mapped[Optional[str]] = mapped_column(String(36), index=True, nullable=True)
     chunk_index: Mapped[int] = mapped_column(Integer, default=0)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    # Stored as JSON array of floats for universal PostgreSQL & SQLite compatibility
-    embedding: Mapped[Optional[List[float]]] = mapped_column(JSON, nullable=True)
+    # Stored as pgvector(1536) on PostgreSQL or JSON on SQLite
+    embedding: Mapped[Optional[List[float]]] = mapped_column(VectorType, nullable=True)
     metadata_info: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

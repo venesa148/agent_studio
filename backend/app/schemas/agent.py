@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 
 class AgentSpec(BaseModel):
@@ -7,10 +7,10 @@ class AgentSpec(BaseModel):
     name: str
     description: Optional[str] = ""
     instructions: Optional[str] = ""
-    model: str = "z-ai/glm-5.3"
+    model: str = "openrouter/free"
     tools: List[str] = []
     mcp_servers: List[str] = []
-    knowledge_sources: Optional[List[Dict[str, Any]]] = []
+    knowledge_sources: Optional[List[Union[Dict[str, Any], str]]] = []
     guardrails: Optional[Dict[str, Any]] = None
     harness: str = "default-safe-v1"
     status: str = "active"
@@ -23,10 +23,10 @@ class AgentSpecCreate(BaseModel):
     name: str
     description: Optional[str] = ""
     instructions: Optional[str] = ""
-    model: str = "gpt-4o-mini"
+    model: str = "openrouter/free"
     tools: List[str] = []
     mcp_servers: List[str] = []
-    knowledge_sources: Optional[List[Dict[str, Any]]] = []
+    knowledge_sources: Optional[List[Union[Dict[str, Any], str]]] = []
     guardrails: Optional[Dict[str, Any]] = None
     harness: str = "default-safe-v1"
     status: str = "active"
@@ -38,7 +38,7 @@ class AgentSpecUpdate(BaseModel):
     model: Optional[str] = None
     tools: Optional[List[str]] = None
     mcp_servers: Optional[List[str]] = None
-    knowledge_sources: Optional[List[Dict[str, Any]]] = None
+    knowledge_sources: Optional[List[Union[Dict[str, Any], str]]] = None
     guardrails: Optional[Dict[str, Any]] = None
     harness: Optional[str] = None
     status: Optional[str] = None
@@ -48,10 +48,10 @@ class AgentSpecResponse(BaseModel):
     name: str
     description: Optional[str] = ""
     instructions: Optional[str] = ""
-    model: str = "gpt-4o-mini"
+    model: str = "openrouter/free"
     tools: List[str] = []
     mcp_servers: List[str] = []
-    knowledge_sources: Optional[List[Dict[str, Any]]] = []
+    knowledge_sources: Optional[List[Union[Dict[str, Any], str]]] = []
     guardrails: Optional[Dict[str, Any]] = None
     harness: str = "default-safe-v1"
     status: str = "active"
