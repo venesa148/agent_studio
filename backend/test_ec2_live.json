@@ -1,0 +1,852 @@
+{
+  "session_id": "sesi-postman-005",
+  "agent_id": "a83c1d90-b63a-4b80-8611-d55216c0dd1a",
+  "agent_slug": "jkn-care-navigator-1-",
+  "response": "Baik Bapak/Ibu, berikut hasilnya ya. 😊\n\n## 1. Status Surat Rujukan Anda ✅\n- **Nomor:** RUJ-2026-0001\n- **Status:** AKTIF (berlaku sampai **1 November 2026**)\n- **Faskes asal:** Puskesmas Kecamatan Gambir\n- **Faskes tujuan:** RSUP Nasional Cipto Mangunkusumo (RSCM)\n- **Poli tujuan:** ⚠️ **Poli Penyakit Dalam** (bukan Orthopaedi)\n\n**Catatan penting:** Surat rujukan Anda ditujukan ke **Poli Penyakit Dalam**, bukan Poli Orthopaedi. Jika Anda ingin berobat ke poli Orthopaedi, sebaiknya Anda **kembali ke Puskesmas Gambir** untuk minta surat rujukan baru sesuai poli yang diinginkan, karena rujukan yang tidak sesuai poli biasanya tidak akan dilayani di rumah sakit.\n\n## 2. Rumah Sakit Rekanan BPJS di Jakarta dengan Layanan Orthopaedi/Tulang\n1. **RSUP Fatmawati** (Jakarta Selatan) – Pusat Ortopedi Terpadu & rehabilitasi medik, rujukan nasional untuk tulang. ±8,2 km.\n2. **RSUD Pasar Rebo** (Jakarta Timur) – Poli Bedah Tulang & fisioterapi. ±11,8 km.\n3. **RSUD Tarakan** (Jakarta Pusat) – Trauma center. ±4,1 km.\n4. **RSCM** (Jakarta Pusat) – Poli spesialis lengkap. ±2,5 km.\n\n## 3. Dokter Orthopaedi yang Tersedia\n| Dokter | Rumah Sakit | Jadwal Praktik |\n|---|---|---|\n| dr. Andi Pratama, Sp.PD | RSUD Tarakan | Senin–Kamis, 08.00–12.00 |\n| dr. Siti Rahma, Sp.PD | RSCM | Rabu–Sabtu, 10.00–14.00 |\n\n## Langkah Selanjutnya\n1. **Konfirmasikan dulu poli yang benar** — apakah keluhan Anda memang untuk Orthopaedi (tulang/sendi)? Jika ya, minta rujukan baru ke poli Orthopaedi di Puskesmas Gambir.\n2. Setelah rujukan sesuai, saya bisa bantu **booking antrean** ke dokter pilihan Anda.\n\nApakah Anda ingin saya bantu booking antrean ke salah satu dokter di atas? Jika ya, mohon sebutkan nama lengkap Anda, rumah sakit, dokter, serta tanggal yang diinginkan. Jika ragu soal poli yang tepat, Anda juga bisa menghubungi **Call Center BPJS 1500678**. 🙏",
+  "current_node": "main_step",
+  "status": "in_progress",
+  "turn_count": 2,
+  "tool_calls": [
+    {
+      "tool": "get_referral_status",
+      "params": {
+        "referral_id": "RUJ-2026-0001"
+      },
+      "result": {
+        "status": "ok",
+        "items": null,
+        "data": {
+          "nomor_rujukan": "RUJ-2026-0001",
+          "status": "AKTIF",
+          "faskes_asal": "Puskesmas Kecamatan Gambir",
+          "faskes_tujuan": "RSUP Nasional Cipto Mangunkusumo",
+          "poli": "Poli Penyakit Dalam",
+          "berlaku_sampai": "2026-11-01"
+        },
+        "_endpoint": "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/referral-status",
+        "_source": "JKN Care Services MCP"
+      }
+    },
+    {
+      "tool": "search_hospitals",
+      "params": {
+        "city": "Jakarta",
+        "service": "Orthopaedi"
+      },
+      "result": {
+        "status": "ok",
+        "items": [
+          {
+            "id": 1,
+            "nama_rs": "RSUPN Dr. Cipto Mangunkusumo (RSCM)",
+            "tipe": "RSUP / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Pusat",
+            "alamat": "Jl. Diponegoro No. 71, Kenari, Senen, Jakarta Pusat",
+            "no_telp": "(021) 1500135",
+            "deskripsi": "Rumah sakit rujukan nasional tertinggi dengan fasilitas subspesialistik terlengkap dan pusat pendidikan kedokteran.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli Spesialis Lengkap",
+              "ICU",
+              "Pusat Kanker Radionkologi",
+              "Transplantasi Organ"
+            ],
+            "jarak_estimasi": "2.5 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 2,
+            "nama_rs": "RSUD Tarakan",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Pusat",
+            "alamat": "Jl. Kyai Caringin No. 7, Cideng, Gambir, Jakarta Pusat",
+            "no_telp": "(021) 3842952",
+            "deskripsi": "Rumah sakit umum daerah rujukan wilayah Jakarta Pusat dengan keunggulan penanganan kardiovaskular dan trauma center.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli Jantung",
+              "Poli Anak",
+              "Radiologi Digital",
+              "Hemodialisa"
+            ],
+            "jarak_estimasi": "4.1 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 3,
+            "nama_rs": "RSUP Fatmawati",
+            "tipe": "RSUP / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Selatan",
+            "alamat": "Jl. RS. Fatmawati Raya No. 4, Cilandak Barat, Jakarta Selatan",
+            "no_telp": "(021) 7501524",
+            "deskripsi": "Pusat rujukan nasional untuk ortopedi, rehabilitasi medik, dan penanganan trauma tulang terlengkap di Indonesia.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Ortopedi Terpadu",
+              "ICU & NICU",
+              "Rehabilitasi Medik",
+              "Bedah Saraf"
+            ],
+            "jarak_estimasi": "8.2 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 4,
+            "nama_rs": "RSUD Pasar Minggu",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Selatan",
+            "alamat": "Jl. TB Simatupang No. 1, Ragunan, Pasar Minggu, Jakarta Selatan",
+            "no_telp": "(021) 29555555",
+            "deskripsi": "RSUD modern dengan fasilitas penunjang ramah anak, poli spesialis bedah, serta layanan hemodialisa terintegrasi.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli Penyakit Dalam",
+              "Poli Mata",
+              "Laboratorium PCR",
+              "Klinik Tumbuh Kembang"
+            ],
+            "jarak_estimasi": "10.5 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 5,
+            "nama_rs": "RSPAD Gatot Soebroto",
+            "tipe": "RS Kepresidenan / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Pusat",
+            "alamat": "Jl. Dr. Abdul Rahman Saleh No. 24, Senen, Jakarta Pusat",
+            "no_telp": "(021) 3441008",
+            "deskripsi": "Rumah sakit rujukan tertinggi TNI Angkatan Darat dan rujukan kepresidenan dengan teknologi bedah robotik dan sel punca.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Kanker Terpadu (CIC)",
+              "Bedah Saraf Mikro",
+              "Poli Gigi Spesialistik",
+              "MRI 3 Tesla"
+            ],
+            "jarak_estimasi": "3.8 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 6,
+            "nama_rs": "RS Jantung dan Pembuluh Darah Harapan Kita",
+            "tipe": "RS Khusus Jantung / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Barat",
+            "alamat": "Jl. Letjen S. Parman Kav. 87, Slipi, Palmerah, Jakarta Barat",
+            "no_telp": "(021) 5684085",
+            "deskripsi": "Pusat jantung nasional rujukan tertinggi untuk bedah jantung terbuka, intervensi vaskular, dan kardiologi pediatrik.",
+            "fasilitas": [
+              "IGD Kardiovaskular 24 Jam",
+              "Kateterisasi Jantung (Cath Lab)",
+              "ICCU Modern",
+              "Bedah Jantung Anak & Dewasa",
+              "Ekokardiografi 4D"
+            ],
+            "jarak_estimasi": "5.6 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 7,
+            "nama_rs": "RS Kanker Dharmais",
+            "tipe": "RS Khusus Kanker / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Barat",
+            "alamat": "Jl. Letjen S. Parman Kav. 84-86, Palmerah, Jakarta Barat",
+            "no_telp": "(021) 5681570",
+            "deskripsi": "Pusat kanker nasional terpadu yang melayani terapi radiasi mutakhir, kemoterapi, imunoterapi, dan deteksi dini onkologi.",
+            "fasilitas": [
+              "IGD Onkologi 24 Jam",
+              "Radioterapi LINAC",
+              "Pusat Kemoterapi One Day Care",
+              "Poli Onkologi Terpadu",
+              "Paliatif Care"
+            ],
+            "jarak_estimasi": "5.9 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 8,
+            "nama_rs": "RS Pusat Otak Nasional (RS PON)",
+            "tipe": "RS Khusus Bedah Saraf / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Timur",
+            "alamat": "Jl. MT Haryono Kav. 11, Cawang, Kramat Jati, Jakarta Timur",
+            "no_telp": "(021) 29373377",
+            "deskripsi": "Pusat rujukan nasional untuk penyakit saraf, stroke komprehensif, neurointervensi, dan rehabilitasi pascastroke.",
+            "fasilitas": [
+              "IGD Stroke Respon Cepat",
+              "Neuro Cathlab",
+              "Unit Stroke Terpadu",
+              "Neuro ICU",
+              "Poli Saraf & Bedah Saraf"
+            ],
+            "jarak_estimasi": "7.8 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 9,
+            "nama_rs": "RSUP Persahabatan",
+            "tipe": "RS Khusus Paru / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Timur",
+            "alamat": "Jl. Persahabatan Raya No. 1, Rawamangun, Pulo Gadung, Jakarta Timur",
+            "no_telp": "(021) 4891708",
+            "deskripsi": "Pusat respirasi nasional untuk penanganan penyakit paru, tuberkulosis resisten obat, asma, dan kanker paru.",
+            "fasilitas": [
+              "IGD Respirasi 24 Jam",
+              "Pusat Asma & PPOK",
+              "Laboratorium Faal Paru",
+              "Bronkoskopi Intervensi",
+              "Isolasi Airborne Bertekanan Negatif"
+            ],
+            "jarak_estimasi": "8.0 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 10,
+            "nama_rs": "RSAB Harapan Kita",
+            "tipe": "RS Khusus Ibu & Anak / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Barat",
+            "alamat": "Jl. Letjen S. Parman Kav. 87, Palmerah, Slipi, Jakarta Barat",
+            "no_telp": "(021) 5668284",
+            "deskripsi": "Pusat rujukan kesehatan ibu dan anak nasional dengan keunggulan bayi tabung, fetomaternal, dan bedah anak langka.",
+            "fasilitas": [
+              "IGD Kebidanan & Anak 24 Jam",
+              "NICU & PICU Level 3",
+              "Pusat Bayi Tabung (Melati)",
+              "Klinik Fetomaternal",
+              "Bedah Pediatrik"
+            ],
+            "jarak_estimasi": "5.7 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 11,
+            "nama_rs": "RSUD Koja",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Utara",
+            "alamat": "Jl. Deli No. 4, Koja, Tanjung Priok, Jakarta Utara",
+            "no_telp": "(021) 43938478",
+            "deskripsi": "RSUD terbesar di pesisir Jakarta Utara dengan kapasitas IGD modern, rawat inap terpadu, dan spesialisasi maritim.",
+            "fasilitas": [
+              "IGD 24 Jam 12 Lantai",
+              "Ruang Rawat Inap Terpadu",
+              "Poli Spesialis Lengkap",
+              "Unit Dialisis",
+              "Radiologi CT Scan"
+            ],
+            "jarak_estimasi": "9.4 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 12,
+            "nama_rs": "RSUD Cengkareng",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Barat",
+            "alamat": "Jl. Bumi Cengkareng Indah No. 1, Cengkareng Timur, Jakarta Barat",
+            "no_telp": "(021) 54372874",
+            "deskripsi": "RS rujukan utama kawasan barat ibu kota yang dilengkapi layanan hemodialisa berkapasitas besar dan klinik geriatri.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli Geriatri",
+              "Hemodialisa 40 Bed",
+              "Bank Darah RS",
+              "Poli Jiwa"
+            ],
+            "jarak_estimasi": "12.1 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 13,
+            "nama_rs": "RSUD Budhi Asih",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Timur",
+            "alamat": "Jl. Dewi Sartika No. 200, Cawang, Kramat Jati, Jakarta Timur",
+            "no_telp": "(021) 8090282",
+            "deskripsi": "RSUD ramah keluarga di Jakarta Timur dengan keunggulan persalinan normal & sesar serta poli spesialis paru anak.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli THT",
+              "Poli Kulit & Kelamin",
+              "Laboratorium Patologi",
+              "Klinik Tumbuh Kembang"
+            ],
+            "jarak_estimasi": "7.3 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 14,
+            "nama_rs": "RSUD Pasar Rebo",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Timur",
+            "alamat": "Jl. TB Simatupang No. 30, Gedong, Pasar Rebo, Jakarta Timur",
+            "no_telp": "(021) 8401127",
+            "deskripsi": "Rumah sakit rujukan di perbatasan Jakarta-Depok dengan keunggulan ortopedi, fisioterapi, dan bedah digestif.",
+            "fasilitas": [
+              "IGD 24 Jam Trauma",
+              "Poli Bedah Tulang",
+              "Klinik Laktasi",
+              "Ruang Bersalin Modern",
+              "ICU Dewasa"
+            ],
+            "jarak_estimasi": "11.8 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 15,
+            "nama_rs": "RS Hermina Jatinegara",
+            "tipe": "RS Swasta / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Timur",
+            "alamat": "Jl. Raya Jatinegara Barat No. 126, Jatinegara, Jakarta Timur",
+            "no_telp": "(021) 8191223",
+            "deskripsi": "RS swasta mitra BPJS terkemuka dengan keunggulan pelayanan ibu, anak, dan subspesialis penyakit dalam.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli Spesialis Anak & Ibu",
+              "Perinatologi",
+              "Poli Gigi Spesialistik",
+              "Fisioterapi"
+            ],
+            "jarak_estimasi": "4.9 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 16,
+            "nama_rs": "RS Premier Jatinegara",
+            "tipe": "RS Swasta / Kelas B",
+            "mitra_bpjs": false,
+            "lokasi": "Jakarta Timur",
+            "alamat": "Jl. Jatinegara Timur No. 85-87, Jatinegara, Jakarta Timur",
+            "no_telp": "(021) 2800888",
+            "deskripsi": "Rumah sakit swasta berstandar internasional dengan keunggulan neurosains, kardiologi terpadu, dan endoscopic spine surgery.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Endoskopi Tulang Belakang",
+              "Cath Lab Hybrid",
+              "Executive Health Checkup"
+            ],
+            "jarak_estimasi": "5.2 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 17,
+            "nama_rs": "RS Pondok Indah",
+            "tipe": "RS Swasta / Kelas B",
+            "mitra_bpjs": false,
+            "lokasi": "Jakarta Selatan",
+            "alamat": "Jl. Metro Duta Kav. UE, Pondok Indah, Jakarta Selatan",
+            "no_telp": "(021) 7657525",
+            "deskripsi": "Fasilitas kesehatan swasta premium dengan teknologi minimally invasive surgery dan pusat ginekologi komprehensif.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Robotic Surgery",
+              "Pusat IVF Terpadu",
+              "Cardiovascular Center",
+              "Suite Rawat Inap"
+            ],
+            "jarak_estimasi": "11.0 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 18,
+            "nama_rs": "RS Islam Jakarta Cempaka Putih",
+            "tipe": "RS Swasta / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Pusat",
+            "alamat": "Jl. Cempaka Putih Tengah I No. 1, Cempaka Putih, Jakarta Pusat",
+            "no_telp": "(021) 4250451",
+            "deskripsi": "Rumah sakit syariah rujukan mitra BPJS dengan pendekatan pelayanan holistik medis dan spiritual.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Hemodialisa",
+              "Poli Syaraf Terpadu",
+              "Bank Darah",
+              "Konsultasi Gizi Islami"
+            ],
+            "jarak_estimasi": "4.4 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 19,
+            "nama_rs": "RS Jiwa Dr. Soeharto Heerdjan",
+            "tipe": "RS Khusus Jiwa / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Barat",
+            "alamat": "Jl. Prof. Dr. Latumeten No. 1, Grogol, Jakarta Barat",
+            "no_telp": "(021) 5682841",
+            "deskripsi": "Pusat rujukan nasional kesehatan jiwa yang melayani terapi psikiatri, rehabilitasi NAPZA, dan konseling psikologi.",
+            "fasilitas": [
+              "IGD Psikiatri 24 Jam",
+              "Poli Jiwa Anak & Remaja",
+              "Klinik Ketergantungan Obat",
+              "Rehabilitasi Psikososial"
+            ],
+            "jarak_estimasi": "6.8 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 20,
+            "nama_rs": "RS Khusus Mata Jakarta Eye Center (JEC) Menteng",
+            "tipe": "RS Khusus Mata / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Jakarta Pusat",
+            "alamat": "Jl. Teuku Cik Ditiro No. 46, Menteng, Jakarta Pusat",
+            "no_telp": "(021) 29221000",
+            "deskripsi": "Pusat kesehatan mata rujukan dengan teknologi bedah katarak fakoemulsifikasi, laser mata, retina, dan glaukoma.",
+            "fasilitas": [
+              "IGD Mata 24 Jam",
+              "Bedah Katarak Modern",
+              "Pusat Retina & Glaukoma",
+              "LASIK Suite",
+              "Pemeriksaan Refraksi Digital"
+            ],
+            "jarak_estimasi": "2.1 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 21,
+            "nama_rs": "RSUP Dr. Hasan Sadikin (RSHS)",
+            "tipe": "RSUP / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Bandung",
+            "alamat": "Jl. Pasteur No. 38, Pasteur, Sukajadi, Kota Bandung, Jawa Barat",
+            "no_telp": "(022) 2034953",
+            "deskripsi": "Rumah sakit rujukan utama provinsi Jawa Barat dengan keunggulan transplantasi ginjal dan pusat penanganan penyakit infeksi.",
+            "fasilitas": [
+              "IGD 24 Jam Terpadu",
+              "Pusat Ginjal & Transplantasi",
+              "Poli Subspesialis Lengkap",
+              "Pusat Jantung Paru"
+            ],
+            "jarak_estimasi": "150 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 22,
+            "nama_rs": "RSUD Al-Ihsan Provinsi Jawa Barat",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Bandung",
+            "alamat": "Jl. Ki Astramanggala, Baleendah, Kec. Baleendah, Bandung",
+            "no_telp": "(022) 5940872",
+            "deskripsi": "RSUD provinsi di Bandung Selatan dengan keunggulan fasilitas kardiologi, onkologi, dan rawat intensif anak.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Kateterisasi Jantung",
+              "Poli Onkologi",
+              "PICU/NICU",
+              "Hemodialisa"
+            ],
+            "jarak_estimasi": "162 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 23,
+            "nama_rs": "RSUP Dr. Kariadi",
+            "tipe": "RSUP / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Semarang",
+            "alamat": "Jl. Dr. Sutomo No. 16, Randusari, Semarang Selatan, Kota Semarang",
+            "no_telp": "(024) 8413476",
+            "deskripsi": "Pusat rujukan nasional regional Jawa Tengah dengan keunggulan onkologi terpadu dan bedah transplantasi.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Kanker Terpadu",
+              "Kedokteran Nuklir",
+              "Laboratorium Riset Terpadu"
+            ],
+            "jarak_estimasi": "440 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 24,
+            "nama_rs": "RSUD Tugurejo",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Semarang",
+            "alamat": "Jl. Walisongo KM 8.5, Tambakaji, Ngaliyan, Semarang",
+            "no_telp": "(024) 7605297",
+            "deskripsi": "Rumah sakit rujukan utama jalur barat Semarang dengan keunggulan trauma center dan urologi modern.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli Urologi & ESWL",
+              "Klinik Geriatri",
+              "Hemodialisa Modern"
+            ],
+            "jarak_estimasi": "435 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 25,
+            "nama_rs": "RSUP Dr. Sardjito",
+            "tipe": "RSUP / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Yogyakarta",
+            "alamat": "Jl. Kesehatan No. 1, Sekip, Sinduadi, Mlati, Sleman, DIY",
+            "no_telp": "(0274) 631190",
+            "deskripsi": "Pusat rujukan utama DIY dan Jawa Tengah bagian selatan yang berafiliasi dengan Fakultas Kedokteran UGM.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Jantung Terpadu",
+              "Pusat Kanker Anak",
+              "Bank Jaringan & Sel"
+            ],
+            "jarak_estimasi": "520 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 26,
+            "nama_rs": "RSUD Kota Yogyakarta (RS Wirosaban)",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Yogyakarta",
+            "alamat": "Jl. Wirosaban No. 1, Sorosutan, Umbulharjo, Kota Yogyakarta",
+            "no_telp": "(0274) 371195",
+            "deskripsi": "RSUD ramah lansia dan ramah disabilitas di jantung kota Yogyakarta dengan pelayanan rawat jalan terintegrasi.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Klinik Tumbuh Kembang",
+              "Hemodialisa",
+              "Poli Akupunktur & Herbal"
+            ],
+            "jarak_estimasi": "525 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 27,
+            "nama_rs": "RSUD Dr. Soetomo",
+            "tipe": "RSUD / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Surabaya",
+            "alamat": "Jl. Mayjen Prof. Dr. Moestopo No. 6-8, Gubeng, Surabaya",
+            "no_telp": "(031) 5501078",
+            "deskripsi": "Rumah sakit rujukan terbesar di Indonesia Timur dengan fasilitas bedah kembar siam, transplantasi, dan onkologi.",
+            "fasilitas": [
+              "IGD Terintegrasi 24 Jam",
+              "Gedung Bedah Pusat Terpadu",
+              "Pusat Onkologi Radiasi",
+              "Pusat Luka Bakar"
+            ],
+            "jarak_estimasi": "780 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 28,
+            "nama_rs": "RS Universitas Airlangga (RSUA)",
+            "tipe": "RS Perguruan Tinggi / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Surabaya",
+            "alamat": "Kampus C Unair, Jl. Mulyorejo, Surabaya",
+            "no_telp": "(031) 5916290",
+            "deskripsi": "RS pendidikan modern dengan keunggulan riset penyakit tropis dan infeksi menular berstandar BSL-3.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Penyakit Tropis (ITD)",
+              "Klinik Fertilitas",
+              "Rehabilitasi Medik Komprehensif"
+            ],
+            "jarak_estimasi": "785 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 29,
+            "nama_rs": "RSUD Dr. Saiful Anwar (RSSA)",
+            "tipe": "RSUD / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Malang",
+            "alamat": "Jl. Jaksa Agung Suprapto No. 2, Klojen, Kota Malang",
+            "no_telp": "(0341) 362101",
+            "deskripsi": "Rumah sakit rujukan provinsi Jawa Timur bagian selatan dengan pusat penanganan kardiovaskular dan bedah digestif.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli Kardiovaskular Subspesialis",
+              "ICU Sentral",
+              "Kedokteran Fisik & Rehabilitasi"
+            ],
+            "jarak_estimasi": "850 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 30,
+            "nama_rs": "RSUP Dr. Wahidin Sudirohusodo",
+            "tipe": "RSUP / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Makassar",
+            "alamat": "Jl. Perintis Kemerdekaan KM 11, Tamalanrea, Makassar",
+            "no_telp": "(0411) 584677",
+            "deskripsi": "Pusat rujukan nasional utama untuk kawasan Indonesia Timur dengan layanan subspesialisasi organ vital terlengkap.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Jantung Terpadu (PJT)",
+              "Pusat Infeksi & Tropis",
+              "Poli Ginjal Hipertensi"
+            ],
+            "jarak_estimasi": "1400 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 31,
+            "nama_rs": "RSUP Prof. Dr. I.G.N.G. Ngoerah (Sanglah)",
+            "tipe": "RSUP / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Denpasar",
+            "alamat": "Jl. Diponegoro, Dauh Puri Klod, Denpasar Barat, Kota Denpasar, Bali",
+            "no_telp": "(0361) 227911",
+            "deskripsi": "Pusat rujukan utama wilayah Bali dan Nusa Tenggara dengan keunggulan hiperbarik chamber dan medical tourism.",
+            "fasilitas": [
+              "IGD 24 Jam Internasional",
+              "Ruang Terapi Oksigen Hiperbarik",
+              "Pusat Luka Bakar",
+              "Pusat Jantung Terpadu"
+            ],
+            "jarak_estimasi": "960 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 32,
+            "nama_rs": "RSUP H. Adam Malik",
+            "tipe": "RSUP / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Medan",
+            "alamat": "Jl. Bunga Lau No. 17, Kemenangan Tani, Medan Tuntungan, Medan",
+            "no_telp": "(061) 8364581",
+            "deskripsi": "Rumah sakit rujukan utama wilayah Sumatera bagian utara dengan keunggulan bedah jantung terbuka dan transplantasi.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Jantung Terpadu",
+              "Onkologi Terpadu",
+              "Hemodialisa 60 Mesin"
+            ],
+            "jarak_estimasi": "1420 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 33,
+            "nama_rs": "RSUP Dr. Mohammad Hoesin (RSMH)",
+            "tipe": "RSUP / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Palembang",
+            "alamat": "Jl. Jend. Sudirman KM 3.5, Sekip Jaya, Kemuning, Palembang",
+            "no_telp": "(0711) 354088",
+            "deskripsi": "Pusat rujukan utama wilayah Sumatera bagian selatan yang memiliki fasilitas kedokteran nuklir dan bedah invasif minimal.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Kanker Terpadu",
+              "Kedokteran Nuklir & SPECT-CT",
+              "Pusat Vaskular"
+            ],
+            "jarak_estimasi": "540 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 34,
+            "nama_rs": "RSUD Kota Tangerang",
+            "tipe": "RSUD / Kelas C",
+            "mitra_bpjs": true,
+            "lokasi": "Tangerang",
+            "alamat": "Jl. Pulau Putri Raya Kav. 1000, Modernland, Tangerang",
+            "no_telp": "(021) 29720202",
+            "deskripsi": "Fasilitas kesehatan rujukan daerah tingkat II tanpa biaya retribusi untuk warga ber-KTP setempat.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli Spesialis Dasar",
+              "Rawat Inap Kelas 3 Luas",
+              "Laboratorium 24 Jam"
+            ],
+            "jarak_estimasi": "22.0 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 35,
+            "nama_rs": "RSUD Cibinong",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Bogor",
+            "alamat": "Jl. KSR Dadi Kusmayadi No. 27, Tengah, Cibinong, Bogor",
+            "no_telp": "(021) 8753482",
+            "deskripsi": "RSUD rujukan utama kawasan Kabupaten Bogor dengan fasilitas bedah laparoskopi dan poli tuberkulosis resisten obat.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli Bedah Laparoskopi",
+              "Pusat TB MDR",
+              "Klinik Geriatri Terpadu"
+            ],
+            "jarak_estimasi": "38.0 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 36,
+            "nama_rs": "RSUD Kota Depok",
+            "tipe": "RSUD / Kelas C",
+            "mitra_bpjs": true,
+            "lokasi": "Depok",
+            "alamat": "Jl. Raya Muchtar No. 99, Sawangan Lama, Sawangan, Depok",
+            "no_telp": "(021) 77884488",
+            "deskripsi": "Rumah sakit umum daerah Depok dengan penekanan pada layanan persalinan, poli anak, dan penyakit dalam.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Poli Kebidanan & Kandungan",
+              "Poli Anak & Imunisasi",
+              "Radiologi Digital"
+            ],
+            "jarak_estimasi": "29.5 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 37,
+            "nama_rs": "RSUD Chasbullah Abdulmadjid",
+            "tipe": "RSUD / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Bekasi",
+            "alamat": "Jl. Pramuka No. 55, Marga Jaya, Bekasi Selatan, Kota Bekasi",
+            "no_telp": "(021) 8841005",
+            "deskripsi": "Rumah sakit rujukan utama Kota Bekasi dengan kapasitas lebih dari 600 tempat tidur dan IGD 8 lantai.",
+            "fasilitas": [
+              "IGD Khusus Bencana",
+              "Poli Paru Terpadu",
+              "Unit Hemodialisa",
+              "Bank Darah Terakreditasi"
+            ],
+            "jarak_estimasi": "21.0 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 38,
+            "nama_rs": "RS Siloam Lippo Village",
+            "tipe": "RS Swasta / Kelas B",
+            "mitra_bpjs": true,
+            "lokasi": "Tangerang",
+            "alamat": "Jl. Siloam No. 6, Lippo Karawaci 1600, Tangerang, Banten",
+            "no_telp": "(021) 80646900",
+            "deskripsi": "RS swasta rekanan BPJS dengan keunggulan neuroscience center, trauma center helipad, dan radioterapi canggih.",
+            "fasilitas": [
+              "IGD 24 Jam Trauma Center",
+              "Helipad Evakuasi Medis",
+              "Radioterapi",
+              "Pusat Transplantasi Ginjal"
+            ],
+            "jarak_estimasi": "27.5 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 39,
+            "nama_rs": "RS Mitra Keluarga Kelapa Gading",
+            "tipe": "RS Swasta / Kelas B",
+            "mitra_bpjs": false,
+            "lokasi": "Jakarta Utara",
+            "alamat": "Jl. Raya Gading Kirana Kav. 2, Kelapa Gading Barat, Jakarta Utara",
+            "no_telp": "(021) 45852700",
+            "deskripsi": "RS swasta modern dengan pusat kardiologi dan kateterisasi jantung anak dan dewasa berstandar internasional.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Cath Lab Kardiovaskular",
+              "MRI 1.5 Tesla",
+              "Pusat Fisioterapi Olahraga"
+            ],
+            "jarak_estimasi": "10.2 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          },
+          {
+            "id": 40,
+            "nama_rs": "RSUD Dr. Moewardi",
+            "tipe": "RSUD / Kelas A",
+            "mitra_bpjs": true,
+            "lokasi": "Surakarta (Solo)",
+            "alamat": "Jl. Kolonel Sutarto No. 132, Jebres, Kota Surakarta, Jawa Tengah",
+            "no_telp": "(0271) 634634",
+            "deskripsi": "Rumah sakit rujukan utama eks-Karesidenan Surakarta dengan layanan bedah onkologi dan pusat bayi tabung.",
+            "fasilitas": [
+              "IGD 24 Jam",
+              "Pusat Onkologi Terpadu",
+              "Klinik Fertilitas Wijayakusuma",
+              "Pusat Jantung Paru"
+            ],
+            "jarak_estimasi": "540 km",
+            "created_at": "2026-10-07T04:04:57.000000Z",
+            "updated_at": "2026-10-07T04:04:57.000000Z"
+          }
+        ],
+        "data": null,
+        "_endpoint": "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/hospitals",
+        "_source": "JKN Care Services MCP"
+      }
+    },
+    {
+      "tool": "find_specialist",
+      "params": {
+        "city": "Jakarta",
+        "specialty": "Orthopaedi"
+      },
+      "result": {
+        "status": "ok",
+        "items": [
+          {
+            "nama_dokter": "dr. Andi Pratama, Sp.PD",
+            "spesialisasi": "Orthopaedi",
+            "rumah_sakit": "RSUD Tarakan",
+            "jadwal_praktek": "Senin - Kamis (08.00 - 12.00)"
+          },
+          {
+            "nama_dokter": "dr. Siti Rahma, Sp.PD",
+            "spesialisasi": "Orthopaedi",
+            "rumah_sakit": "RSCM",
+            "jadwal_praktek": "Rabu - Sabtu (10.00 - 14.00)"
+          }
+        ],
+        "data": null,
+        "_endpoint": "https://fundamentals-mechanism-serious-paragraphs.trycloudflare.com/api/v1/mock-bpjs/specialists",
+        "_source": "JKN Care Services MCP"
+      }
+    }
+  ]
+}

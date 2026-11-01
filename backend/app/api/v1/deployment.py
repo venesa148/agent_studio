@@ -282,20 +282,31 @@ async def publish_agent(payload: PublishRequest, db: AsyncSession = Depends(get_
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=f"Validasi Graph Gagal: {str(ve)}")
 
-    # 3. Sinkronkan YAML ke server runtime AWS dengan slug unik
+    # 3. Generate API Key unik untuk client
+    generated_key = f"agy_live_{secrets.token_hex(12)}"
+    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    # 4. Sinkronkan YAML ke server runtime AWS dengan slug unik
     spec_slug = spec.get("slug", "")
     clean_slug = payload.slug.strip().lower() or spec_slug or "agent"
     target_endpoint = f"{AWS_RUNTIME_URL}/agents/{clean_slug}/invoke"
     runtime_sync_msg = f"Endpoint disiapkan di {target_endpoint}."
 
     try:
+        headers = {}
+        deploy_secret = os.getenv("DEPLOY_SECRET", "")
+        if deploy_secret:
+            headers["Authorization"] = f"Bearer {deploy_secret}"
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 f"{AWS_RUNTIME_URL}/deploy",
+                headers=headers,
                 json={
                     "slug": clean_slug,
                     "yaml_content": yaml_text,
-                    "target_environment": "production"
+                    "target_environment": "production",
+                    "api_key": generated_key
                 }
             )
             if resp.status_code == 200:
@@ -304,10 +315,6 @@ async def publish_agent(payload: PublishRequest, db: AsyncSession = Depends(get_
                 runtime_sync_msg = f"Runtime merespon: {resp.text}"
     except Exception as err:
         runtime_sync_msg = f"Koneksi runtime sync: {str(err)}."
-
-    # 4. Generate API Key unik untuk client
-    generated_key = f"agy_live_{secrets.token_hex(12)}"
-    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
     current_deployment["status"] = "live"
     current_deployment["agent_id"] = spec.get("agent_id", "custom-agent-001")
